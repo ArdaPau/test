@@ -22,7 +22,7 @@ if _G.MM2_ENVANTER and _G.MM2_ENVANTER.durdur then pcall(_G.MM2_ENVANTER.durdur)
 
 local AYAR = {
     port = 8765,            -- bot.py'deki bridge_port ile aynı olmalı
-    host = nil,             -- nil: emülatör için 10.0.2.2, sonra 127.0.0.1 denenir; PC'nin LAN IP'si de yazılabilir
+    host = "192.168.0.25",  -- PC'nin LAN IP'si (emülatör için)
     ad = nil,               -- script adı; nil = yerel oyuncunun adı
     chat_komut = "/inv",    -- oyun içi komut
     veri_modu = true,       -- önce oyun verisinden (remote) okumayı dene
