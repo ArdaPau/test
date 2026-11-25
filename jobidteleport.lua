@@ -1,16 +1,14 @@
 --=============================================================
---  Job ID Joiner  |  Mobile friendly executor panel
+--  Job ID Joiner v2  |  Mobile executor panel (failsafe)
 --=============================================================
-local Players         = game:GetService("Players")
-local TeleportService = game:GetService("TeleportService")
-local UserInputService= game:GetService("UserInputService")
-local TweenService    = game:GetService("TweenService")
-local player          = Players.LocalPlayer
+local Players          = game:GetService("Players")
+local TeleportService  = game:GetService("TeleportService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService     = game:GetService("TweenService")
+local player           = Players.LocalPlayer
 
--- eski sürümü temizle
 pcall(function() if _G.__JOINER_GUI then _G.__JOINER_GUI:Destroy() end end)
 
--- ---------------- yardımcılar ----------------
 local function getParent()
     local ok, hui = pcall(function() return gethui() end)
     if ok and hui then return hui end
@@ -28,9 +26,7 @@ local function makeDraggable(handle, frame)
             dragStart = input.Position
             startPos  = frame.Position
             input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    dragging = false
-                end
+                if input.UserInputState == Enum.UserInputState.End then dragging = false end
             end)
         end
     end)
@@ -46,33 +42,36 @@ local function makeDraggable(handle, frame)
     end)
 end
 
--- job id / url temizle
-local function extractJobId(raw)
+-- link / jobId ayıklama
+local UUID = "%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x"
+
+local function parseInput(raw)
     raw = (raw or ""):gsub("%s+", "")
-    local fromUrl = raw:match("[?&]jobId=([%w%-_]+)")
-    if fromUrl then return fromUrl end
-    return raw:match("([%w%-]+)$") or raw
+    local placeFromUrl = raw:match("roblox%.com/games/(%d+)")
+    local jobFromUrl   = raw:match("[?&]jobId=([%w%-_]+)")
+    local jobId = jobFromUrl
+        or raw:match(UUID)
+        or raw:match("([%w%-_]+)$")
+        or ""
+    return jobId, placeFromUrl
 end
 
 local function validJobId(id)
-    return #id >= 20 and id:match("^[%w%-_]+$") ~= nil
+    if #id < 20 then return false end
+    return id:match("^[%w%-_]+$") ~= nil
 end
 
--- ---------------- arayüz ----------------
-local parent = getParent()
-
+-- ---------------- UI ----------------
 local screen = Instance.new("ScreenGui")
 screen.Name = "JobJoiner"
 screen.ResetOnSpawn = false
 screen.IgnoreGuiInset = true
 screen.DisplayOrder = 999
 screen.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-screen.Parent = parent
+screen.Parent = getParent()
 _G.__JOINER_GUI = screen
 
--- açma / kapama butonu
 local toggle = Instance.new("TextButton")
-toggle.Name = "Toggle"
 toggle.Size = UDim2.new(0, 52, 0, 52)
 toggle.AnchorPoint = Vector2.new(1, 0.5)
 toggle.Position = UDim2.new(1, -16, 0.5, 0)
@@ -81,17 +80,13 @@ toggle.Text = "J"
 toggle.TextColor3 = Color3.fromRGB(120, 200, 255)
 toggle.Font = Enum.Font.GothamBold
 toggle.TextSize = 24
-toggle.AutoButtonColor = true
 toggle.BorderSizePixel = 0
 toggle.Parent = screen
 Instance.new("UICorner", toggle).CornerRadius = UDim.new(0, 16)
-local tStroke = Instance.new("UIStroke", toggle)
-tStroke.Color = Color3.fromRGB(70, 130, 180)
-tStroke.Thickness = 2
+local tS = Instance.new("UIStroke", toggle)
+tS.Color = Color3.fromRGB(70, 130, 180); tS.Thickness = 2
 
--- panel
 local panel = Instance.new("Frame")
-panel.Name = "Panel"
 panel.Size = UDim2.new(0, 300, 0, 196)
 panel.AnchorPoint = Vector2.new(0.5, 0.5)
 panel.Position = UDim2.new(0.5, 0, 0.5, 0)
@@ -100,11 +95,9 @@ panel.BorderSizePixel = 0
 panel.Visible = false
 panel.Parent = screen
 Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 14)
-local pStroke = Instance.new("UIStroke", panel)
-pStroke.Color = Color3.fromRGB(60, 60, 76)
-pStroke.Thickness = 1
+local pS = Instance.new("UIStroke", panel)
+pS.Color = Color3.fromRGB(60, 60, 76); pS.Thickness = 1
 
--- başlık çubuğu
 local header = Instance.new("Frame")
 header.Size = UDim2.new(1, 0, 0, 42)
 header.BackgroundTransparency = 1
@@ -136,7 +129,6 @@ Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 10)
 
 makeDraggable(header, panel)
 
--- job id kutusu
 local box = Instance.new("TextBox")
 box.Size = UDim2.new(1, -104, 0, 42)
 box.Position = UDim2.new(0, 14, 0, 50)
@@ -166,7 +158,6 @@ pasteBtn.BorderSizePixel = 0
 pasteBtn.Parent = panel
 Instance.new("UICorner", pasteBtn).CornerRadius = UDim.new(0, 10)
 
--- join butonu
 local joinBtn = Instance.new("TextButton")
 joinBtn.Size = UDim2.new(1, -28, 0, 46)
 joinBtn.Position = UDim2.new(0, 14, 0, 102)
@@ -179,10 +170,9 @@ joinBtn.BorderSizePixel = 0
 joinBtn.Parent = panel
 Instance.new("UICorner", joinBtn).CornerRadius = UDim.new(0, 10)
 
--- durum yazısı
 local status = Instance.new("TextLabel")
-status.Size = UDim2.new(1, -28, 0, 24)
-status.Position = UDim2.new(0, 14, 0, 158)
+status.Size = UDim2.new(1, -28, 0, 30)
+status.Position = UDim2.new(0, 14, 0, 154)
 status.BackgroundTransparency = 1
 status.Font = Enum.Font.Gotham
 status.TextSize = 12
@@ -197,7 +187,6 @@ local function setStatus(msg, color)
     status.TextColor3 = color or Color3.fromRGB(150, 150, 165)
 end
 
--- ---------------- aç / kapa ----------------
 local open = false
 local function setOpen(state)
     open = state
@@ -216,19 +205,15 @@ end
 
 toggle.MouseButton1Click:Connect(function() setOpen(not open) end)
 closeBtn.MouseButton1Click:Connect(function() setOpen(false) end)
-
-UserInputService.InputBegan:Connect(function(input, processed)
-    if processed then return end
-    if input.KeyCode == Enum.KeyCode.RightShift then
-        setOpen(not open)
-    end
+UserInputService.InputBegan:Connect(function(input, gp)
+    if gp then return end
+    if input.KeyCode == Enum.KeyCode.RightShift then setOpen(not open) end
 end)
 
--- ---------------- yapıştır ----------------
 pasteBtn.MouseButton1Click:Connect(function()
     local ok, clip = pcall(function() return getclipboard() end)
     if ok and type(clip) == "string" and clip ~= "" then
-        box.Text = extractJobId(clip)
+        box.Text = clip:gsub("%s+", "")
         setStatus("Panodan alındı.", Color3.fromRGB(150, 200, 150))
     else
         setStatus("Pano okunamadı, elle yapıştır.", Color3.fromRGB(220, 170, 80))
@@ -238,43 +223,75 @@ end)
 -- ---------------- join ----------------
 local busy = false
 
+local function failMsg(reason, extra)
+    busy = false
+    local r = tostring(reason)
+    local hint = ({
+        ServerFull   = "Sunucu dolu.",
+        GameFull     = "Oyun/place dolu.",
+        SameServer   = "Zaten o sunucudasın.",
+        Restricted   = "Erişim kısıtlı (private/premium).",
+        Unauthorized = "Yetkisiz (teleport kapalı).",
+        TeleportFailed = "Roblox teleportu reddetti.",
+        HTTPError    = "Bağlantı hatası, tekrar dene.",
+    })[r] or ("Teleport başarısız: " .. r)
+    if extra and extra ~= "" then hint = hint .. " " .. tostring(extra) end
+    setStatus(hint, Color3.fromRGB(230, 90, 90))
+end
+
 local function doJoin()
     if busy then return end
-    local jobId = extractJobId(box.Text)
+    local jobId, placeFromUrl = parseInput(box.Text)
+    local placeId = placeFromUrl and tonumber(placeFromUrl) or game.PlaceId
 
     if not validJobId(jobId) then
-        setStatus("Geçersiz Job ID.", Color3.fromRGB(230, 90, 90))
+        setStatus("Geçersiz Job ID ("..tostring(#jobId).." karakter).", Color3.fromRGB(230, 90, 90))
         return
     end
 
     busy = true
-    setStatus("Sunucuya bağlanılıyor...", Color3.fromRGB(120, 200, 255))
+    setStatus("Bağlanılıyor... ("..placeId..")", Color3.fromRGB(120, 200, 255))
 
-    -- TeleportAsync varsa onu kullan, yoksa klasik yöntem
-    local ok = pcall(function()
-        if TeleportService.TeleportAsync then
-            local opts = Instance.new("TeleportOptions")
-            opts.ServerInstanceId = jobId
-            TeleportService:TeleportAsync(game.PlaceId, {player}, opts)
-        else
-            TeleportService:TeleportToPlaceInstance(game.PlaceId, jobId, player)
-        end
-    end)
+    local settled = false
+    local conn
 
-    if not ok then
-        -- son çare
-        local ok2 = pcall(function()
-            TeleportService:TeleportToPlaceInstance(game.PlaceId, jobId, player)
-        end)
-        if not ok2 then
-            busy = false
-            setStatus("Teleport başarısız. Sunucu dolu/kapalı olabilir.", Color3.fromRGB(230, 90, 90))
-            return
-        end
+    local function finish()
+        settled = true
+        if conn then pcall(function() conn:Disconnect() end) end
+        busy = false
     end
 
-    setStatus("Yönlendiriliyorsun...", Color3.fromRGB(150, 220, 150))
-    task.delay(8, function() busy = false end)
+    conn = TeleportService.TeleportInitFailed:Connect(function(_, result, msg)
+        if settled then return end
+        settled = true
+        pcall(function() conn:Disconnect() end)
+        failMsg(result, msg)
+    end)
+
+    task.delay(12, function()
+        if settled then return end
+        finish()
+        setStatus("Zaman aşımı: sunucu dolu, kapalı ya da jobId yanlış. Tekrar dene.",
+            Color3.fromRGB(230, 170, 60))
+    end)
+
+    -- 1) klasik yöntem (mobilde daha güvenilir)
+    local ok, err = pcall(function()
+        TeleportService:TeleportToPlaceInstance(placeId, jobId, player)
+    end)
+
+    -- 2) hata verdiyse TeleportAsync
+    if not ok and not settled then
+        local ok2, err2 = pcall(function()
+            local opts = Instance.new("TeleportOptions")
+            opts.ServerInstanceId = jobId
+            TeleportService:TeleportAsync(placeId, {player}, opts)
+        end)
+        if not ok2 and not settled then
+            finish()
+            setStatus("Teleport hatası: "..tostring(err2 or err), Color3.fromRGB(230, 90, 90))
+        end
+    end
 end
 
 joinBtn.MouseButton1Click:Connect(doJoin)
