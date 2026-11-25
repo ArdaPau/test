@@ -462,20 +462,21 @@ local function flingPlayer(target)
             d.CanCollide = false
         end
     end
-    pcall(function()
-        hrp.CFrame = thrp.CFrame * CFrame.new(0, 0, 0)
-        local bav = Instance.new("BodyAngularVelocity")
-        bav.AngularVelocity = Vector3.new(0, 50000, 0)
-        bav.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
-        bav.Parent = hrp
-        local bv = Instance.new("BodyVelocity")
-        bv.Velocity = Vector3.new(0, 0, 0)
-        bv.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-        bv.Parent = hrp
-        task.wait(0.12)
-        bav:Destroy()
-        bv:Destroy()
-    end)
+    local thrust = Instance.new("BodyThrust")
+    thrust.Name = "KashYeet"
+    thrust.Force = Vector3.new(9999, 9999, 9999)
+    thrust.Location = thrp.Position
+    thrust.Parent = hrp
+    local startClock = os.clock()
+    repeat
+        if not target.Parent or not hrp.Parent then break end
+        local tHRP = getHRP(target)
+        if not tHRP then break end
+        hrp.CFrame = tHRP.CFrame
+        thrust.Location = tHRP.Position
+        RunService.Heartbeat:Wait()
+    until os.clock() - startClock > 0.6
+    if thrust and thrust.Parent then thrust:Destroy() end
     if hrp and hrp.Parent then
         hrp.AssemblyAngularVelocity = Vector3.new()
         hrp.AssemblyLinearVelocity = Vector3.new()
@@ -484,7 +485,6 @@ local function flingPlayer(target)
     for part, st in pairs(collideStates) do
         if part.Parent then part.CanCollide = st end
     end
-    task.wait(0.05)
     flingBusy = false
 end
 local function tryFling(target)
