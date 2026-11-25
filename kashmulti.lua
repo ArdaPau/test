@@ -153,6 +153,7 @@ local function defaultFlags()
         autoGun    = false,
         shortcutFling = false,
         shortcutShoot = false,
+        showRoles     = false,
     }
 end
 local flags = defaultFlags()
@@ -353,6 +354,12 @@ local function defaultTabs()
                     type = "toggle", id = "sc_shoot", feature = "shortcutShoot",
                     label = { en = "Shoot murderer button", tr = "Shoot murderer butonu" },
                     desc = { en = "Adds a shoot button to the screen", tr = "Ekrana vur butonu ekler" },
+                    active = false,
+                },
+                {
+                    type = "toggle", id = "sc_roles", feature = "showRoles",
+                    label = { en = "Show murderer & sheriff", tr = "Katil ve şerifi göster" },
+                    desc = { en = "Shows roles with avatars at bottom right", tr = "Sağ altta avatar ve isimlerle gösterir" },
                     active = false,
                 },
             },
@@ -579,7 +586,7 @@ local emoteDefs = {
         if rig.RightHip then rig.RightHip.Transform = CFrame.Angles(0, math.rad(w * 10), math.rad(-w * 10)) end
     end,
 }
-local emoteConn, emoteRig, emoteClock
+local emoteConn, emoteRig, emoteClock, emoteAnimate
 local function stopProcedural()
     if emoteConn then emoteConn:Disconnect(); emoteConn = nil end
     if emoteRig then
@@ -588,6 +595,10 @@ local function stopProcedural()
         end
         emoteRig = nil
     end
+    if emoteAnimate and emoteAnimate.Parent then
+        pcall(function() emoteAnimate.Disabled = false end)
+    end
+    emoteAnimate = nil
 end
 local function startProcedural(name, char)
     local def = emoteDefs[name]
@@ -595,21 +606,24 @@ local function startProcedural(name, char)
     stopProcedural()
     local hum = char:FindFirstChildOfClass("Humanoid")
     if not hum then return end
-    emoteRig = getRig(char)
-    local has = false
-    for _ in pairs(emoteRig) do has = true break end
-    if not has then return end
-
+    local animate = char:FindFirstChild("Animate")
+    if animate then
+        emoteAnimate = animate
+        pcall(function() animate.Disabled = true end)
+    end
     local animator = hum:FindFirstChildOfClass("Animator")
     if animator then
         for _, tr in ipairs(animator:GetPlayingAnimationTracks()) do
             pcall(function() tr:Stop(0) end)
         end
     end
-
+    emoteRig = getRig(char)
+    local has = false
+    for _ in pairs(emoteRig) do has = true break end
+    if not has then return end
     emoteClock = 0
     emoteConn = RunService.RenderStepped:Connect(function(dt)
-        if not char.Parent or not char:FindFirstChildOfClass("Humanoid") then
+        if not char or not char.Parent or not char:FindFirstChildOfClass("Humanoid") then
             stopProcedural()
             return
         end
@@ -763,7 +777,7 @@ local screenGui = new("ScreenGui", {
     Parent = guiParent,
 })
 ui.screenGui = screenGui
-local flingShortBtn, shootShortBtn
+local flingShortBtn, shootShortBtn, rolesPanel, murdererRow, sheriffRow
 
 local window = new("Frame", {
     Size = UDim2.fromOffset(WINDOW_W, WINDOW_H),
@@ -868,6 +882,62 @@ flingShortBtn = shortcutButton("Fling", -16)
 shootShortBtn = shortcutButton("Shoot", -62)
 flingShortBtn.MouseButton1Click:Connect(function() flingCurrent() end)
 shootShortBtn.MouseButton1Click:Connect(function() task.spawn(shootMurderer) end)
+
+local thumbCache = {}
+local function avatarImage(userId)
+    if thumbCache[userId] then return thumbCache[userId] end
+    local ok, content = pcall(function()
+        return Players:GetUserThumbnailAsync(userId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size48x48)
+    end)
+    if ok and content then
+        thumbCache[userId] = content
+        return content
+    end
+    return nil
+end
+
+rolesPanel = new("Frame", {
+    Size = UDim2.fromOffset(180, 62),
+    Position = UDim2.new(1, -16, 1, -112),
+    AnchorPoint = Vector2.new(1, 1),
+    BackgroundColor3 = C.window,
+    BackgroundTransparency = 0.15,
+    BorderSizePixel = 0,
+    Visible = false,
+    Parent = screenGui,
+})
+corner(rolesPanel, 8)
+stroke(rolesPanel, C.red, 1, 0.6)
+
+local function roleRow(y)
+    local row = new("Frame", {
+        Size = UDim2.new(1, -16, 0, 26),
+        Position = UDim2.fromOffset(8, y),
+        BackgroundTransparency = 1,
+        Parent = rolesPanel,
+    })
+    local img = new("ImageLabel", {
+        Size = UDim2.fromOffset(22, 22),
+        Position = UDim2.fromOffset(0, 2),
+        BackgroundColor3 = C.darker,
+        BorderSizePixel = 0,
+        Image = "",
+        Parent = row,
+    })
+    corner(img, 11)
+    local name = makeText(row, {
+        Position = UDim2.fromOffset(30, 0),
+        Size = UDim2.new(1, -30, 1, 0),
+        Text = "—",
+        TextSize = 10,
+        Font = Enum.Font.GothamMedium,
+        TextColor3 = C.textDim,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+    })
+    return { row = row, img = img, name = name }
+end
+murdererRow = roleRow(6)
+sheriffRow = roleRow(34)
 
 local sidebar = new("Frame", {
     Size = UDim2.new(0, SIDEBAR_W, 1, 0),
@@ -1931,7 +2001,15 @@ function onFlagChanged(feature, value)
         flingShortBtn.Visible = value
     elseif feature == "shortcutShoot" and shootShortBtn then
         shootShortBtn.Visible = value
+    elseif feature == "showRoles" and rolesPanel then
+        rolesPanel.Visible = value
     end
+end
+
+local function applyUiFlags()
+    if flingShortBtn then flingShortBtn.Visible = flags.shortcutFling == true end
+    if shootShortBtn then shootShortBtn.Visible = flags.shortcutShoot == true end
+    if rolesPanel then rolesPanel.Visible = flags.showRoles == true end
 end
 
 function saveConfig()
@@ -2057,6 +2135,40 @@ task.spawn(function()
     end
 end)
 
+task.spawn(function()
+    while true do
+        task.wait(1)
+        if flags.showRoles and rolesPanel then
+            local mur, shf
+            for _, plr in ipairs(Players:GetPlayers()) do
+                local r = getRole(plr)
+                if r == "Murderer" then mur = plr
+                elseif r == "Sheriff" then shf = plr end
+            end
+            if mur then
+                murdererRow.name.Text = mur.Name
+                murdererRow.name.TextColor3 = ROLE_COLORS.Murderer
+                local img = avatarImage(mur.UserId)
+                murdererRow.img.Image = img or ""
+            else
+                murdererRow.name.Text = "—"
+                murdererRow.name.TextColor3 = C.textFaint
+                murdererRow.img.Image = ""
+            end
+            if shf then
+                sheriffRow.name.Text = shf.Name
+                sheriffRow.name.TextColor3 = ROLE_COLORS.Sheriff
+                local img = avatarImage(shf.UserId)
+                sheriffRow.img.Image = img or ""
+            else
+                sheriffRow.name.Text = "—"
+                sheriffRow.name.TextColor3 = C.textFaint
+                sheriffRow.img.Image = ""
+            end
+        end
+    end
+end)
+
 local hidden = false
 local hideCF = CFrame.new(0, -60, 0)
 
@@ -2079,6 +2191,7 @@ local function setupTouchFling()
 end
 LocalPlayer.CharacterAdded:Connect(function()
     hidden = false
+    stopProcedural()
     task.wait(1)
     setupTouchFling()
 end)
@@ -2278,8 +2391,7 @@ resetBtn.MouseButton1Click:Connect(function()
         if hrp then hrp.Anchored = false end
         hidden = false
     end
-    if flingShortBtn then flingShortBtn.Visible = false end
-    if shootShortBtn then shootShortBtn.Visible = false end
+    applyUiFlags()
     rebuildKeybindCache()
     setStatus(UITEXT[currentLang].resetDone)
     renderAll()
@@ -2287,6 +2399,7 @@ end)
 
 rebuildKeybindCache()
 renderAll()
+applyUiFlags()
 setStatus(UITEXT[currentLang].themeActive)
 
 pcall(function()
@@ -2308,5 +2421,6 @@ pcall(function()
         end
         if data.lang then currentLang = data.lang end
         renderAll()
+        applyUiFlags()
     end
 end)
