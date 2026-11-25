@@ -37,6 +37,7 @@ local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 local Yerel = Players.LocalPlayer
 local AD = AYAR.ad or (Yerel and Yerel.Name) or "script"
+local SURUM = "script-v2"
 
 local function yaz(...)
     if AYAR.ayrinti then print("[mm2-envanter]", ...) end
@@ -650,27 +651,83 @@ local function gui_oku(oyuncu)
     return birlestir(liste)
 end
 
--- ===== 6) OKU ============================================================
+-- ===== 6) ROZET: sağ altta "Inv" ==========================================
+-- Rozet görünüyorsa script yüklendi (enjeksiyon tuttu). Okuma sırasında rengi/yazısı değişir.
+-- İstemezsen: MM2_ENVANTER.rozet(false)
+local rozet_gui, rozet_etiket
+local RENK_OK = Color3.fromRGB(130, 255, 150)
+local RENK_BEKLE = Color3.fromRGB(255, 215, 120)
+local RENK_HATA = Color3.fromRGB(255, 120, 120)
+
+local function rozet(goster)
+    if goster == false then
+        pcall(function() if rozet_gui then rozet_gui:Destroy() end end)
+        rozet_gui, rozet_etiket = nil, nil
+        return
+    end
+    pcall(function()
+        local pg = player_gui()
+        if not pg or rozet_gui then return end
+        local eski = pg:FindFirstChild("MM2EnvanterRozet")  -- önceki enjeksiyondan kalmış olabilir
+        if eski then eski:Destroy() end
+        rozet_gui = Instance.new("ScreenGui")
+        rozet_gui.Name = "MM2EnvanterRozet"
+        rozet_gui.ResetOnSpawn = false
+        rozet_gui.IgnoreGuiInset = true
+        rozet_gui.DisplayOrder = 1000
+        rozet_gui.Parent = pg
+        rozet_etiket = Instance.new("TextLabel")
+        rozet_etiket.Size = UDim2.new(0, 118, 0, 26)
+        rozet_etiket.Position = UDim2.new(1, -132, 1, -100)  -- sağ alt köşe
+        rozet_etiket.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
+        rozet_etiket.BackgroundTransparency = 0.15
+        rozet_etiket.TextSize = 15
+        rozet_etiket.Font = Enum.Font.GothamBold
+        rozet_etiket.TextColor3 = Color3.fromRGB(130, 255, 150)
+        rozet_etiket.Text = "Inv • yüklendi"
+        rozet_etiket.Parent = rozet_gui
+        local kose = Instance.new("UICorner")
+        kose.CornerRadius = UDim.new(0, 6)
+        kose.Parent = rozet_etiket
+    end)
+end
+
+local function rozet_yaz(metin, renk)
+    pcall(function()
+        if not rozet_etiket then return end
+        rozet_etiket.Text = "Inv • " .. metin
+        rozet_etiket.TextColor3 = renk or RENK_OK
+    end)
+end
+
+-- ===== 7) OKU ============================================================
 local function oku(nick)
     local oyuncu = oyuncu_bul(nick)
-    if not oyuncu then return nil, ("%s sunucuda bulunamadı"):format(tostring(nick)) end
+    if not oyuncu then
+        rozet_yaz("bulunamadı", RENK_HATA)
+        return nil, ("%s sunucuda bulunamadı"):format(tostring(nick))
+    end
+    rozet_yaz("okuyor", RENK_BEKLE)
     local basla = os.clock()
 
     local esyalar = veri_oku(oyuncu)
     if esyalar and #esyalar > 0 then
         yaz(("%s: veri modu, %d çeşit, %.2f sn"):format(oyuncu.Name, #esyalar, os.clock() - basla))
+        rozet_yaz("okundu")
         return birlestir(esyalar)
     end
 
     local gui_esyalar, hata = gui_oku(oyuncu)
     if gui_esyalar and #gui_esyalar > 0 then
         yaz(("%s: GUI modu, %d çeşit, %.2f sn"):format(oyuncu.Name, #gui_esyalar, os.clock() - basla))
+        rozet_yaz("okundu")
         return gui_esyalar
     end
+    rozet_yaz("okunamadı", RENK_HATA)
     return nil, hata or "envanter okunamadı"
 end
 
--- ===== 7) OYUN İÇİ KOMUT =================================================
+-- ===== 8) OYUN İÇİ KOMUT =================================================
 local calisiyor = true
 
 -- Uzun özeti sohbete tek satır olarak bas (Roblox sohbet sınırı ~200 karakter)
@@ -731,13 +788,15 @@ local function chat_bagla()
     end)
 end
 
--- ===== 8) BOT DÖNGÜSÜ ====================================================
+-- ===== 9) BOT DÖNGÜSÜ ====================================================
 local function dongu()
     if kopru("/hello", { name = AD }) then
         yaz(("bot köprüsü hazır: 127.0.0.1:%d"):format(AYAR.port))
+        rozet_yaz("bağlı")
     else
         yaz(("bot kapalı (127.0.0.1:%d). Sadece oyun içi komut çalışır; bot.py başlayınca köprü kurulur.")
             :format(AYAR.port))
+        rozet_yaz("bot kapalı", RENK_HATA)
     end
     while calisiyor do
         local cevap = kopru("/poll?name=" .. ad_kodla(AD))
@@ -750,9 +809,8 @@ local function dongu()
                 govde.error = tostring((not ok and esyalar) or hata or "envanter okunamadı")
             end
             kopru("/result", govde)
-        else
-            task.wait(AYAR.poll_araligi)
         end
+        task.wait(AYAR.poll_araligi)  -- iş olsa da olmasa da kısa bekle
     end
 end
 
@@ -805,14 +863,19 @@ _G.MM2_ENVANTER = {
     end,
     durdur = function()
         calisiyor = false
+        rozet_yaz("durduruldu", RENK_BEKLE)
         yaz("durduruldu")
     end,
+    rozet = rozet,
+    surum = SURUM,
 }
 
+rozet()
 chat_bagla()
 task.spawn(function()
     local ok, hata = pcall(dongu)
     if not ok then yaz("döngü hatası: " .. tostring(hata)) end
 end)
-yaz(("yüklendi — sohbete %s <nick> yaz ya da konsola MM2_ENVANTER.oku(\"nick\")")
-    :format(AYAR.chat_komut))
+yaz(("yüklendi (%s) — sohbete %s <nick> yaz ya da konsola MM2_ENVANTER.oku(\"nick\")")
+    :format(SURUM, AYAR.chat_komut))
+rozet_yaz("hazır")
