@@ -1,0 +1,283 @@
+--=============================================================
+--  Job ID Joiner  |  Mobile friendly executor panel
+--=============================================================
+local Players         = game:GetService("Players")
+local TeleportService = game:GetService("TeleportService")
+local UserInputService= game:GetService("UserInputService")
+local TweenService    = game:GetService("TweenService")
+local player          = Players.LocalPlayer
+
+-- eski sürümü temizle
+pcall(function() if _G.__JOINER_GUI then _G.__JOINER_GUI:Destroy() end end)
+
+-- ---------------- yardımcılar ----------------
+local function getParent()
+    local ok, hui = pcall(function() return gethui() end)
+    if ok and hui then return hui end
+    local ok2, cg = pcall(function() return game:GetService("CoreGui") end)
+    if ok2 and cg then return cg end
+    return player:WaitForChild("PlayerGui")
+end
+
+local function makeDraggable(handle, frame)
+    local dragging, dragStart, startPos
+    handle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragging  = true
+            dragStart = input.Position
+            startPos  = frame.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if not dragging then return end
+        if input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch then
+            local d = input.Position - dragStart
+            frame.Position = UDim2.new(
+                startPos.X.Scale, startPos.X.Offset + d.X,
+                startPos.Y.Scale, startPos.Y.Offset + d.Y)
+        end
+    end)
+end
+
+-- job id / url temizle
+local function extractJobId(raw)
+    raw = (raw or ""):gsub("%s+", "")
+    local fromUrl = raw:match("[?&]jobId=([%w%-_]+)")
+    if fromUrl then return fromUrl end
+    return raw:match("([%w%-]+)$") or raw
+end
+
+local function validJobId(id)
+    return #id >= 20 and id:match("^[%w%-_]+$") ~= nil
+end
+
+-- ---------------- arayüz ----------------
+local parent = getParent()
+
+local screen = Instance.new("ScreenGui")
+screen.Name = "JobJoiner"
+screen.ResetOnSpawn = false
+screen.IgnoreGuiInset = true
+screen.DisplayOrder = 999
+screen.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screen.Parent = parent
+_G.__JOINER_GUI = screen
+
+-- açma / kapama butonu
+local toggle = Instance.new("TextButton")
+toggle.Name = "Toggle"
+toggle.Size = UDim2.new(0, 52, 0, 52)
+toggle.AnchorPoint = Vector2.new(1, 0.5)
+toggle.Position = UDim2.new(1, -16, 0.5, 0)
+toggle.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
+toggle.Text = "J"
+toggle.TextColor3 = Color3.fromRGB(120, 200, 255)
+toggle.Font = Enum.Font.GothamBold
+toggle.TextSize = 24
+toggle.AutoButtonColor = true
+toggle.BorderSizePixel = 0
+toggle.Parent = screen
+Instance.new("UICorner", toggle).CornerRadius = UDim.new(0, 16)
+local tStroke = Instance.new("UIStroke", toggle)
+tStroke.Color = Color3.fromRGB(70, 130, 180)
+tStroke.Thickness = 2
+
+-- panel
+local panel = Instance.new("Frame")
+panel.Name = "Panel"
+panel.Size = UDim2.new(0, 300, 0, 196)
+panel.AnchorPoint = Vector2.new(0.5, 0.5)
+panel.Position = UDim2.new(0.5, 0, 0.5, 0)
+panel.BackgroundColor3 = Color3.fromRGB(24, 24, 30)
+panel.BorderSizePixel = 0
+panel.Visible = false
+panel.Parent = screen
+Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 14)
+local pStroke = Instance.new("UIStroke", panel)
+pStroke.Color = Color3.fromRGB(60, 60, 76)
+pStroke.Thickness = 1
+
+-- başlık çubuğu
+local header = Instance.new("Frame")
+header.Size = UDim2.new(1, 0, 0, 42)
+header.BackgroundTransparency = 1
+header.Parent = panel
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -50, 1, 0)
+title.Position = UDim2.new(0, 14, 0, 0)
+title.BackgroundTransparency = 1
+title.Font = Enum.Font.GothamBold
+title.TextSize = 15
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.TextColor3 = Color3.fromRGB(235, 235, 242)
+title.Text = "Server Joiner"
+title.Parent = header
+
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.new(0, 34, 0, 34)
+closeBtn.AnchorPoint = Vector2.new(1, 0)
+closeBtn.Position = UDim2.new(1, -6, 0, 4)
+closeBtn.BackgroundColor3 = Color3.fromRGB(200, 60, 60)
+closeBtn.Text = "X"
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.TextSize = 14
+closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeBtn.BorderSizePixel = 0
+closeBtn.Parent = header
+Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 10)
+
+makeDraggable(header, panel)
+
+-- job id kutusu
+local box = Instance.new("TextBox")
+box.Size = UDim2.new(1, -104, 0, 42)
+box.Position = UDim2.new(0, 14, 0, 50)
+box.BackgroundColor3 = Color3.fromRGB(38, 38, 48)
+box.BorderSizePixel = 0
+box.PlaceholderText = "Job ID veya sunucu linki..."
+box.PlaceholderColor3 = Color3.fromRGB(120, 120, 140)
+box.Text = ""
+box.ClearTextOnFocus = false
+box.Font = Enum.Font.Gotham
+box.TextSize = 13
+box.TextColor3 = Color3.fromRGB(230, 230, 240)
+box.TextXAlignment = Enum.TextXAlignment.Left
+box.Parent = panel
+Instance.new("UICorner", box).CornerRadius = UDim.new(0, 10)
+Instance.new("UIPadding", box).PaddingLeft = UDim.new(0, 10)
+
+local pasteBtn = Instance.new("TextButton")
+pasteBtn.Size = UDim2.new(0, 76, 0, 42)
+pasteBtn.Position = UDim2.new(1, -90, 0, 50)
+pasteBtn.BackgroundColor3 = Color3.fromRGB(45, 55, 75)
+pasteBtn.Text = "Yapıştır"
+pasteBtn.Font = Enum.Font.GothamMedium
+pasteBtn.TextSize = 13
+pasteBtn.TextColor3 = Color3.fromRGB(170, 200, 240)
+pasteBtn.BorderSizePixel = 0
+pasteBtn.Parent = panel
+Instance.new("UICorner", pasteBtn).CornerRadius = UDim.new(0, 10)
+
+-- join butonu
+local joinBtn = Instance.new("TextButton")
+joinBtn.Size = UDim2.new(1, -28, 0, 46)
+joinBtn.Position = UDim2.new(0, 14, 0, 102)
+joinBtn.BackgroundColor3 = Color3.fromRGB(40, 150, 90)
+joinBtn.Text = "JOIN"
+joinBtn.Font = Enum.Font.GothamBold
+joinBtn.TextSize = 15
+joinBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+joinBtn.BorderSizePixel = 0
+joinBtn.Parent = panel
+Instance.new("UICorner", joinBtn).CornerRadius = UDim.new(0, 10)
+
+-- durum yazısı
+local status = Instance.new("TextLabel")
+status.Size = UDim2.new(1, -28, 0, 24)
+status.Position = UDim2.new(0, 14, 0, 158)
+status.BackgroundTransparency = 1
+status.Font = Enum.Font.Gotham
+status.TextSize = 12
+status.TextXAlignment = Enum.TextXAlignment.Left
+status.TextColor3 = Color3.fromRGB(150, 150, 165)
+status.Text = "Hazır."
+status.TextWrapped = true
+status.Parent = panel
+
+local function setStatus(msg, color)
+    status.Text = msg
+    status.TextColor3 = color or Color3.fromRGB(150, 150, 165)
+end
+
+-- ---------------- aç / kapa ----------------
+local open = false
+local function setOpen(state)
+    open = state
+    if open then
+        panel.Visible = true
+        panel.Size = UDim2.new(0, 260, 0, 196)
+        TweenService:Create(panel, TweenInfo.new(0.18, Enum.EasingStyle.Quad),
+            {Size = UDim2.new(0, 300, 0, 196)}):Play()
+    else
+        local t = TweenService:Create(panel, TweenInfo.new(0.12, Enum.EasingStyle.Quad),
+            {Size = UDim2.new(0, 260, 0, 196)})
+        t:Play()
+        t.Completed:Connect(function() panel.Visible = false end)
+    end
+end
+
+toggle.MouseButton1Click:Connect(function() setOpen(not open) end)
+closeBtn.MouseButton1Click:Connect(function() setOpen(false) end)
+
+UserInputService.InputBegan:Connect(function(input, processed)
+    if processed then return end
+    if input.KeyCode == Enum.KeyCode.RightShift then
+        setOpen(not open)
+    end
+end)
+
+-- ---------------- yapıştır ----------------
+pasteBtn.MouseButton1Click:Connect(function()
+    local ok, clip = pcall(function() return getclipboard() end)
+    if ok and type(clip) == "string" and clip ~= "" then
+        box.Text = extractJobId(clip)
+        setStatus("Panodan alındı.", Color3.fromRGB(150, 200, 150))
+    else
+        setStatus("Pano okunamadı, elle yapıştır.", Color3.fromRGB(220, 170, 80))
+    end
+end)
+
+-- ---------------- join ----------------
+local busy = false
+
+local function doJoin()
+    if busy then return end
+    local jobId = extractJobId(box.Text)
+
+    if not validJobId(jobId) then
+        setStatus("Geçersiz Job ID.", Color3.fromRGB(230, 90, 90))
+        return
+    end
+
+    busy = true
+    setStatus("Sunucuya bağlanılıyor...", Color3.fromRGB(120, 200, 255))
+
+    -- TeleportAsync varsa onu kullan, yoksa klasik yöntem
+    local ok = pcall(function()
+        if TeleportService.TeleportAsync then
+            local opts = Instance.new("TeleportOptions")
+            opts.ServerInstanceId = jobId
+            TeleportService:TeleportAsync(game.PlaceId, {player}, opts)
+        else
+            TeleportService:TeleportToPlaceInstance(game.PlaceId, jobId, player)
+        end
+    end)
+
+    if not ok then
+        -- son çare
+        local ok2 = pcall(function()
+            TeleportService:TeleportToPlaceInstance(game.PlaceId, jobId, player)
+        end)
+        if not ok2 then
+            busy = false
+            setStatus("Teleport başarısız. Sunucu dolu/kapalı olabilir.", Color3.fromRGB(230, 90, 90))
+            return
+        end
+    end
+
+    setStatus("Yönlendiriliyorsun...", Color3.fromRGB(150, 220, 150))
+    task.delay(8, function() busy = false end)
+end
+
+joinBtn.MouseButton1Click:Connect(doJoin)
+box.FocusLost:Connect(function(enter) if enter then doJoin() end end)
+
+setStatus("Hazır. Job ID gir ve JOIN'e bas.")
