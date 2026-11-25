@@ -271,9 +271,16 @@ local ARG_ORNEKLERI = {
     function(p) return { "Inventory", p.UserId } end,
 }
 
-local function cagir(uzak, arglar)
-    local ok, sonuc = pcall(function() return uzak:InvokeServer(table.unpack(arglar)) end)
-    return ok and sonuc or nil
+local function cagir(uzak, arglar, zaman_asimi)
+    local bitti, sonuc = false, nil
+    task.spawn(function()
+        local ok, res = pcall(function() return uzak:InvokeServer(table.unpack(arglar)) end)
+        if ok then sonuc = res end
+        bitti = true
+    end)
+    local bitis = os.clock() + (zaman_asimi or 2.5)
+    while not bitti and os.clock() < bitis do task.wait(0.05) end
+    return bitti and sonuc or nil
 end
 
 local function veri_ogren(hedef)
@@ -305,8 +312,11 @@ end
 local function veri_oku(oyuncu)
     if not AYAR.veri_modu then return nil end
     if VERI.uzak then
-        local liste = tablodan_oku(cagir(VERI.uzak, ARG_ORNEKLERI[VERI.arg](oyuncu)))
-        if #liste > 0 then return liste end
+        local ham = cagir(VERI.uzak, ARG_ORNEKLERI[VERI.arg](oyuncu), 4)
+        if ham ~= nil then
+            local liste = tablodan_oku(ham)
+            if #liste > 0 or type(ham) == "table" then return liste end
+        end
         VERI.uzak, VERI.arg = nil, nil  -- kaynak artık cevap vermiyor: yeniden öğren
     end
     return veri_ogren(oyuncu)
