@@ -412,8 +412,14 @@ local function getRole(plr)
     end
     return "None"
 end
-local function getTargetPlayer(nearestFallback)
-    local p = state.selectedPlayer
+local function getTargetPlayer(nearestFallback, preferEmote)
+    local p
+    if preferEmote then
+        p = state.emotePlayer
+        if not (p and p.Parent and p.Character) then p = state.selectedPlayer end
+    else
+        p = state.selectedPlayer
+    end
     if p and p.Parent and p.Character then return p end
     if not nearestFallback then return nil end
     local hrp = getHRP()
@@ -593,17 +599,19 @@ local function startProcedural(name, char)
     local has = false
     for _ in pairs(emoteRig) do has = true break end
     if not has then return end
+
+    local animator = hum:FindFirstChildOfClass("Animator")
+    if animator then
+        for _, tr in ipairs(animator:GetPlayingAnimationTracks()) do
+            pcall(function() tr:Stop(0) end)
+        end
+    end
+
     emoteClock = 0
-    emoteConn = RunService.Heartbeat:Connect(function(dt)
+    emoteConn = RunService.RenderStepped:Connect(function(dt)
         if not char.Parent or not char:FindFirstChildOfClass("Humanoid") then
             stopProcedural()
             return
-        end
-        local animator = hum:FindFirstChildOfClass("Animator")
-        if animator then
-            for _, tr in ipairs(animator:GetPlayingAnimationTracks()) do
-                pcall(function() tr:Stop(0) end)
-            end
         end
         emoteClock = emoteClock + dt
         def(emoteRig, emoteClock)
@@ -1608,7 +1616,6 @@ local function playerDropdown(item, parent, cardH, listH, onPick)
     end
     table.sort(playerList, function(a, b) return string.lower(a.Name) < string.lower(b.Name) end)
     local cols = 3
-    local rows = math.max(1, math.ceil(#playerList / cols))
     local holder, card = baseCard(parent, 1, cardH)
     padding(card, 10, 10, 10, 10)
     new("UIListLayout", {
@@ -2107,7 +2114,7 @@ RunService.Heartbeat:Connect(function(dt)
         end
     end
     if flags.orbit and hrp and not hidden then
-        local target = getTargetPlayer(true)
+        local target = getTargetPlayer(true, true)
         local thrp = target and getHRP(target)
         if thrp then
             orbitAngle = orbitAngle + dt * 3
@@ -2117,7 +2124,7 @@ RunService.Heartbeat:Connect(function(dt)
         end
     end
     if flags.tbag and not flags.orbit and hrp and not hidden then
-        local target = getTargetPlayer(true)
+        local target = getTargetPlayer(true, true)
         local thrp = target and getHRP(target)
         if thrp then
             tbagClock = tbagClock + dt
