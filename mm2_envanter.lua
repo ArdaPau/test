@@ -22,7 +22,8 @@ if _G.MM2_ENVANTER and _G.MM2_ENVANTER.durdur then pcall(_G.MM2_ENVANTER.durdur)
 
 local AYAR = {
     port = 8765,            -- bot.py'deki bridge_port ile aynı olmalı
-    host = "192.168.0.25",  -- PC'nin LAN IP'si (emülatör için)
+    host = nil,             -- nil: emülatör için 10.0.2.2, sonra 127.0.0.1 denenir; PC'nin LAN IP'si de yazılabilir
+    url = _G.MM2_URL,       -- HTTPS tünel için (ör. "https://xxx.trycloudflare.com"); _G.MM2_URL ile de verilebilir
     ad = nil,               -- script adı; nil = yerel oyuncunun adı
     chat_komut = "/inv",    -- oyun içi komut
     veri_modu = true,       -- önce oyun verisinden (remote) okumayı dene
@@ -51,13 +52,16 @@ local http = (syn and syn.request) or (http and http.request) or http_request or
 -- ulaşılır. PC'de çalışan executor'da ise 127.0.0.1 doğrudur. İkisi de denenir, çalışan hatırlanır.
 -- PC'ye 10.0.2.2 ile ulaşılamıyorsa AYAR.host'a PC'nin LAN IP'sini yaz (ör. "192.168.1.34").
 local ADRESLER = { "10.0.2.2", "127.0.0.1" }
-if AYAR.host then ADRESLER = { AYAR.host, "127.0.0.1" } end
+if AYAR.url and AYAR.url ~= "" then ADRESLER = { AYAR.url }
+elseif AYAR.host then ADRESLER = { AYAR.host, "127.0.0.1" } end
 local aktif_adres = nil
 
 local function tek_adres(adres, yol, govde)
     if not http then return nil end
+    local tam_url = (adres:match("^https?://") and (adres:gsub("/+$", "") .. yol))
+        or ("http://%s:%d%s"):format(adres, AYAR.port, yol)
     local ok, cevap = pcall(http, {
-        Url = ("http://%s:%d%s"):format(adres, AYAR.port, yol),
+        Url = tam_url,
         Method = govde and "POST" or "GET",
         Headers = { ["Content-Type"] = "application/json" },
         Body = govde and HttpService:JSONEncode(govde) or nil,
