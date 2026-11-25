@@ -535,10 +535,6 @@ local function updateHighlights()
     end
 end
 
-local EMOTES = {
-    Zen   = "rbxassetid://5211750376",
-    Floss = "rbxassetid://5915779726",
-}
 local function getRig(char)
     local rig = {}
     for _, m in ipairs(char:GetDescendants()) do
@@ -577,7 +573,7 @@ local emoteDefs = {
         if rig.RightHip then rig.RightHip.Transform = CFrame.Angles(0, math.rad(w * 10), math.rad(-w * 10)) end
     end,
 }
-local emoteConn, emoteRig, emoteClock, currentTrack
+local emoteConn, emoteRig, emoteClock
 local function stopProcedural()
     if emoteConn then emoteConn:Disconnect(); emoteConn = nil end
     if emoteRig then
@@ -591,19 +587,29 @@ local function startProcedural(name, char)
     local def = emoteDefs[name]
     if not def then return end
     stopProcedural()
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum then return end
     emoteRig = getRig(char)
+    local has = false
+    for _ in pairs(emoteRig) do has = true break end
+    if not has then return end
     emoteClock = 0
     emoteConn = RunService.Heartbeat:Connect(function(dt)
-        if not char.Parent or not char:FindFirstChild("HumanoidRootPart") then
+        if not char.Parent or not char:FindFirstChildOfClass("Humanoid") then
             stopProcedural()
             return
+        end
+        local animator = hum:FindFirstChildOfClass("Animator")
+        if animator then
+            for _, tr in ipairs(animator:GetPlayingAnimationTracks()) do
+                pcall(function() tr:Stop(0) end)
+            end
         end
         emoteClock = emoteClock + dt
         def(emoteRig, emoteClock)
     end)
 end
 local function stopEmotes()
-    if currentTrack then pcall(function() currentTrack:Stop() end); currentTrack = nil end
     stopProcedural()
     flags.orbit = false
     flags.tbag = false
@@ -617,26 +623,7 @@ local function playEmote(name)
     local target = state.emotePlayer or LocalPlayer
     local char = target.Character
     local hum = char and char:FindFirstChildOfClass("Humanoid")
-    if not char or not hum then return end
-    stopEmotes()
-    local animator = hum:FindFirstChildOfClass("Animator")
-    if not animator then
-        animator = Instance.new("Animator")
-        animator.Parent = hum
-    end
-    local anim = Instance.new("Animation")
-    anim.AnimationId = EMOTES[name]
-    local track
-    pcall(function() track = animator:LoadAnimation(anim) end)
-    if track then
-        pcall(function() track:Play() end)
-        task.wait(0.4)
-        if track.IsPlaying and track.Length > 0 then
-            currentTrack = track
-            return
-        end
-        pcall(function() track:Stop() end)
-    end
+    if not char or not hum or hum.Health <= 0 then return end
     startProcedural(name, char)
 end
 
@@ -700,22 +687,45 @@ local function activateTool(tool)
         pcall(function() tool:Activate() end)
     end
 end
+
+local shootBusy = false
 local function shootMurderer()
+    if shootBusy then return end
     local char = LocalPlayer.Character
-    if not char then return end
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if not char or not hum or hum.Health <= 0 then return end
+    refreshRoundState()
     local murderer = findMurderer()
     if not murderer then setStatus("No murderer found") return end
+    local thrp = getHRP(murderer)
+    local hrp = getHRP()
+    if not thrp or not hrp then return end
     local gun = char:FindFirstChild("Gun")
     if not gun then
         local bp = LocalPlayer:FindFirstChildOfClass("Backpack")
-        if bp and bp:FindFirstChild("Gun") then gun = equipTool("Gun") end
+        gun = bp and bp:FindFirstChild("Gun")
+        if gun then pcall(function() hum:EquipTool(gun) end) end
     end
     if not gun then setStatus("You need a gun") return end
-    local hrp = getHRP()
-    local thrp = getHRP(murderer)
-    if hrp and thrp then hrp.CFrame = CFrame.lookAt(hrp.Position, thrp.Position) end
-    task.wait(0.05)
-    activateTool(gun)
+    shootBusy = true
+    local saved = hrp.CFrame
+    for _ = 1, 4 do
+        thrp = getHRP(murderer)
+        if not thrp or hum.Health <= 0 then break end
+        local standPos = (thrp.CFrame * CFrame.new(0, 0, 7)).Position
+        hrp.CFrame = CFrame.lookAt(standPos, thrp.Position)
+        hrp.AssemblyLinearVelocity = Vector3.new()
+        task.wait(0.08)
+        pcall(function() gun:Activate() end)
+        task.wait(0.08)
+    end
+    task.wait(0.12)
+    if hrp and hrp.Parent then
+        hrp.CFrame = saved
+        hrp.AssemblyLinearVelocity = Vector3.new()
+        hrp.AssemblyAngularVelocity = Vector3.new()
+    end
+    shootBusy = false
     setStatus("Shot at " .. murderer.Name)
 end
 
@@ -849,7 +859,7 @@ end
 flingShortBtn = shortcutButton("Fling", -16)
 shootShortBtn = shortcutButton("Shoot", -62)
 flingShortBtn.MouseButton1Click:Connect(function() flingCurrent() end)
-shootShortBtn.MouseButton1Click:Connect(function() shootMurderer() end)
+shootShortBtn.MouseButton1Click:Connect(function() task.spawn(shootMurderer) end)
 
 local sidebar = new("Frame", {
     Size = UDim2.new(0, SIDEBAR_W, 1, 0),
@@ -858,7 +868,7 @@ local sidebar = new("Frame", {
     Parent = window,
 })
 corner(sidebar, 10)
-local sidebarMask = new("Frame", {
+new("Frame", {
     Size = UDim2.new(0, SIDEBAR_W, 1, 0),
     BackgroundTransparency = 1,
     Parent = window,
@@ -942,7 +952,7 @@ local footer = new("Frame", {
     Parent = sidebar,
 })
 ui.footer = footer
-local footerLine = new("Frame", {
+new("Frame", {
     Size = UDim2.new(1, 0, 0, 1),
     Position = UDim2.new(0, 0, 0, 0),
     BackgroundColor3 = C.red,
@@ -1141,7 +1151,7 @@ new("UIListLayout", {
     SortOrder = Enum.SortOrder.LayoutOrder,
     Parent = contentScroll,
 })
-local statusLine = new("Frame", {
+new("Frame", {
     Size = UDim2.new(1, -28, 0, 1),
     Position = UDim2.new(0, 14, 1, -38),
     BackgroundColor3 = C.red,
@@ -1590,7 +1600,7 @@ local function buildAction(item, parent, width)
     end)
     return holder
 end
-local function buildPlayerFling(item, parent)
+local function playerDropdown(item, parent, cardH, listH, onPick)
     local isOpen = item.dropdownOpen
     local playerList = {}
     for _, p in ipairs(Players:GetPlayers()) do
@@ -1599,8 +1609,6 @@ local function buildPlayerFling(item, parent)
     table.sort(playerList, function(a, b) return string.lower(a.Name) < string.lower(b.Name) end)
     local cols = 3
     local rows = math.max(1, math.ceil(#playerList / cols))
-    local listH = isOpen and (rows * 30 + 4) or 0
-    local cardH = 10 + 32 + 8 + (isOpen and (listH + 8) or 0) + 28 + 10
     local holder, card = baseCard(parent, 1, cardH)
     padding(card, 10, 10, 10, 10)
     new("UIListLayout", {
@@ -1694,12 +1702,23 @@ local function buildPlayerFling(item, parent)
             opt.MouseButton1Click:Connect(function()
                 item.selectedPlayer = plr.Name
                 item.dropdownOpen = false
-                state.selectedPlayer = plr
-                setStatus(string.format("%s %s", plr.Name, UITEXT[currentLang].autoFlung))
+                onPick(plr)
                 renderContent()
             end)
         end
     end
+    return holder, card
+end
+local function buildPlayerFling(item, parent)
+    local isOpen = item.dropdownOpen
+    local count = 0
+    for _, p in ipairs(Players:GetPlayers()) do if p ~= LocalPlayer then count = count + 1 end end
+    local listH = isOpen and (math.max(1, math.ceil(count / 3)) * 30 + 4) or 0
+    local cardH = 10 + 32 + 8 + (isOpen and (listH + 8) or 0) + 28 + 10
+    local holder, card = playerDropdown(item, parent, cardH, listH, function(plr)
+        state.selectedPlayer = plr
+        setStatus(plr.Name .. " " .. UITEXT[currentLang].autoFlung)
+    end)
     local flingBtn = new("TextButton", {
         Size = UDim2.new(1, 0, 0, 28),
         LayoutOrder = 10,
@@ -1725,114 +1744,14 @@ local function buildPlayerFling(item, parent)
 end
 local function buildPlayerSelect(item, parent)
     local isOpen = item.dropdownOpen
-    local playerList = {}
-    for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer then table.insert(playerList, p) end
-    end
-    table.sort(playerList, function(a, b) return string.lower(a.Name) < string.lower(b.Name) end)
-    local cols = 3
-    local rows = math.max(1, math.ceil(#playerList / cols))
-    local listH = isOpen and (rows * 30 + 4) or 0
+    local count = 0
+    for _, p in ipairs(Players:GetPlayers()) do if p ~= LocalPlayer then count = count + 1 end end
+    local listH = isOpen and (math.max(1, math.ceil(count / 3)) * 30 + 4) or 0
     local cardH = 10 + 32 + 8 + (isOpen and (listH + 8) or 0) + 10
-    local holder, card = baseCard(parent, 1, cardH)
-    padding(card, 10, 10, 10, 10)
-    new("UIListLayout", {
-        Padding = UDim.new(0, 8),
-        SortOrder = Enum.SortOrder.LayoutOrder,
-        Parent = card,
-    })
-    local dropBtn = new("TextButton", {
-        Size = UDim2.new(1, 0, 0, 32),
-        LayoutOrder = 1,
-        BackgroundColor3 = C.dark,
-        BorderSizePixel = 0,
-        AutoButtonColor = false,
-        Text = "",
-        Parent = card,
-    })
-    corner(dropBtn, 6)
-    stroke(dropBtn, C.red, 1, 0.75)
-    makeText(dropBtn, {
-        Position = UDim2.fromOffset(10, 0),
-        Size = UDim2.new(1, -34, 1, 0),
-        Text = item.selectedPlayer
-            and (t(item.label) .. ": " .. item.selectedPlayer)
-            or t(item.label),
-        Font = Enum.Font.GothamMedium,
-        TextSize = 11,
-        TextColor3 = C.text,
-        TextTruncate = Enum.TextTruncate.AtEnd,
-    })
-    makeText(dropBtn, {
-        Size = UDim2.fromOffset(16, 32),
-        Position = UDim2.new(1, -22, 0, 0),
-        Text = isOpen and "▲" or "▼",
-        TextSize = 9,
-        TextColor3 = C.red,
-        TextXAlignment = Enum.TextXAlignment.Center,
-    })
-    dropBtn.MouseButton1Click:Connect(function()
-        item.dropdownOpen = not item.dropdownOpen
-        renderContent()
+    local holder = playerDropdown(item, parent, cardH, listH, function(plr)
+        state.emotePlayer = plr
+        setStatus(plr.Name .. " " .. UITEXT[currentLang].autoFlung)
     end)
-    if isOpen then
-        local grid = new("Frame", {
-            Size = UDim2.new(1, 0, 0, listH),
-            LayoutOrder = 2,
-            BackgroundColor3 = C.darker,
-            BorderSizePixel = 0,
-            Parent = card,
-        })
-        corner(grid, 6)
-        stroke(grid, C.red, 1, 0.7)
-        new("UIGridLayout", {
-            CellSize = UDim2.new(1 / cols, -4, 0, 26),
-            CellPadding = UDim2.new(0, 4, 0, 4),
-            SortOrder = Enum.SortOrder.LayoutOrder,
-            Parent = grid,
-        })
-        padding(grid, 4, 4, 4, 4)
-        if #playerList == 0 then
-            makeText(grid, {
-                Size = UDim2.new(1, 0, 0, 26),
-                Text = "—",
-                TextSize = 10,
-                TextColor3 = C.textFaint,
-                TextXAlignment = Enum.TextXAlignment.Center,
-                LayoutOrder = 1,
-            })
-        end
-        for i, plr in ipairs(playerList) do
-            local isSel = (item.selectedPlayer == plr.Name)
-            local opt = new("TextButton", {
-                Size = UDim2.fromScale(1, 1),
-                LayoutOrder = i,
-                BackgroundColor3 = isSel and C.redSoft or C.card,
-                BackgroundTransparency = isSel and 0 or 1,
-                BorderSizePixel = 0,
-                AutoButtonColor = false,
-                Text = "",
-                Parent = grid,
-            })
-            corner(opt, 4)
-            if isSel then stroke(opt, C.red, 1, 0.6) end
-            makeText(opt, {
-                Size = UDim2.fromScale(1, 1),
-                Text = plr.Name,
-                TextSize = 9,
-                TextColor3 = isSel and Color3.fromRGB(252, 165, 165) or C.textDim,
-                TextXAlignment = Enum.TextXAlignment.Center,
-                TextTruncate = Enum.TextTruncate.AtEnd,
-            })
-            opt.MouseButton1Click:Connect(function()
-                item.selectedPlayer = plr.Name
-                item.dropdownOpen = false
-                state.emotePlayer = plr
-                setStatus(string.format("%s %s", plr.Name, UITEXT[currentLang].autoFlung))
-                renderContent()
-            end)
-        end
-    end
     return holder
 end
 local function buildSection(item, parent)
@@ -2036,26 +1955,35 @@ local function makeDraggable(frame)
             dragging = true
             dragStart = input.Position
             startPos = window.Position
-            input.Changed:Connect(function()
+            local conn
+            conn = input.Changed:Connect(function()
                 if input.UserInputState == Enum.UserInputState.End then
                     dragging = false
+                    if conn then conn:Disconnect() end
                 end
             end)
         end
     end)
 end
+makeDraggable(window)
+makeDraggable(stage)
+makeDraggable(header)
+makeDraggable(headerLine)
 makeDraggable(brandLine)
 makeDraggable(sidebar)
-makeDraggable(headerLine)
+makeDraggable(brand)
+makeDraggable(tabList)
 UserInputService.InputChanged:Connect(function(input)
-    if dragging then
+    if dragging and not UserInputService:GetFocusedTextBox() then
         if input.UserInputType == Enum.UserInputType.MouseMovement
             or input.UserInputType == Enum.UserInputType.Touch then
             local delta = input.Position - dragStart
-            window.Position = UDim2.new(
-                startPos.X.Scale, startPos.X.Offset + delta.X,
-                startPos.Y.Scale, startPos.Y.Offset + delta.Y
-            )
+            if delta.Magnitude > 2 then
+                window.Position = UDim2.new(
+                    startPos.X.Scale, startPos.X.Offset + delta.X,
+                    startPos.Y.Scale, startPos.Y.Offset + delta.Y
+                )
+            end
         end
     end
 end)
@@ -2122,6 +2050,9 @@ task.spawn(function()
     end
 end)
 
+local hidden = false
+local hideCF = CFrame.new(0, -60, 0)
+
 local touchConn
 local function setupTouchFling()
     if touchConn then touchConn:Disconnect() end
@@ -2130,10 +2061,7 @@ local function setupTouchFling()
     if not hrp then return end
     touchConn = hrp.Touched:Connect(function(hit)
         if not flags.touchFling then return end
-        local model = hit:FindFirstAncestorOfClass("Model")
-        if not model then
-            model = hit.Parent
-        end
+        local model = hit:FindFirstAncestorOfClass("Model") or hit.Parent
         if model and model ~= char then
             local plr = Players:GetPlayerFromCharacter(model)
             if plr and plr ~= LocalPlayer then
@@ -2143,6 +2071,7 @@ local function setupTouchFling()
     end)
 end
 LocalPlayer.CharacterAdded:Connect(function()
+    hidden = false
     task.wait(1)
     setupTouchFling()
 end)
@@ -2163,7 +2092,7 @@ RunService.Heartbeat:Connect(function(dt)
             hrp.AssemblyLinearVelocity = lin.Unit * 60
         end
     end
-    if flags.walkFling and hrp then
+    if flags.walkFling and hrp and not hidden then
         walkAccum = walkAccum + dt
         if walkAccum >= 0.3 then
             walkAccum = 0
@@ -2177,7 +2106,7 @@ RunService.Heartbeat:Connect(function(dt)
             end
         end
     end
-    if flags.orbit and hrp then
+    if flags.orbit and hrp and not hidden then
         local target = getTargetPlayer(true)
         local thrp = target and getHRP(target)
         if thrp then
@@ -2187,7 +2116,7 @@ RunService.Heartbeat:Connect(function(dt)
             hrp.AssemblyLinearVelocity = Vector3.new()
         end
     end
-    if flags.tbag and not flags.orbit and hrp then
+    if flags.tbag and not flags.orbit and hrp and not hidden then
         local target = getTargetPlayer(true)
         local thrp = target and getHRP(target)
         if thrp then
@@ -2202,7 +2131,7 @@ end)
 task.spawn(function()
     while true do
         task.wait(0.12)
-        if flags.farm then
+        if flags.farm and not hidden then
             local hrp = getHRP()
             if hrp then
                 local coin = findNearestCoin()
@@ -2244,13 +2173,25 @@ task.spawn(function()
         local char = LocalPlayer.Character
         local hum = char and char:FindFirstChildOfClass("Humanoid")
         local hrp = char and char:FindFirstChild("HumanoidRootPart")
-        if char and hum and hum.Health > 0 then
+        if char and hum and hum.Health > 0 and hrp then
             refreshRoundState()
             local role = getRole(LocalPlayer)
-            if flags.xpHide and role == "Innocent" and hrp then
-                hrp.CFrame = CFrame.new(0, -60, 0)
+            if flags.xpHide and role == "Innocent" then
+                if not hidden then
+                    hidden = true
+                    hideCF = CFrame.new(hrp.Position.X, -60, hrp.Position.Z)
+                    hrp.AssemblyLinearVelocity = Vector3.new()
+                    hrp.AssemblyAngularVelocity = Vector3.new()
+                    hrp.CFrame = hideCF
+                    hrp.Anchored = true
+                end
+            else
+                if hidden then
+                    hidden = false
+                    if hrp and hrp.Parent then hrp.Anchored = false end
+                end
             end
-            if flags.xpKillAll and role == "Murderer" and hrp then
+            if flags.xpKillAll and role == "Murderer" and hrp and not hidden then
                 local knife = equipTool("Knife")
                 local nearest, bestDist = nil, math.huge
                 for _, plr in ipairs(Players:GetPlayers()) do
@@ -2273,7 +2214,7 @@ task.spawn(function()
                     end
                 end
             end
-            if flags.xpShoot and hrp then
+            if flags.xpShoot and hrp and not hidden then
                 local murderer = findMurderer()
                 local gun = char:FindFirstChild("Gun")
                 if murderer and gun then
@@ -2296,7 +2237,7 @@ end)
 task.spawn(function()
     while true do
         task.wait(0.5)
-        if flags.autoGun then
+        if flags.autoGun and not hidden then
             local char = LocalPlayer.Character
             local hrp = char and char:FindFirstChild("HumanoidRootPart")
             if hrp and not char:FindFirstChild("Gun") then
@@ -2325,6 +2266,11 @@ resetBtn.MouseButton1Click:Connect(function()
     searchBox.Text = ""
     clearHighlights()
     stopEmotes()
+    if hidden then
+        local hrp = getHRP()
+        if hrp then hrp.Anchored = false end
+        hidden = false
+    end
     if flingShortBtn then flingShortBtn.Visible = false end
     if shootShortBtn then shootShortBtn.Visible = false end
     rebuildKeybindCache()
