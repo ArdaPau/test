@@ -22,6 +22,7 @@ if _G.MM2_ENVANTER and _G.MM2_ENVANTER.durdur then pcall(_G.MM2_ENVANTER.durdur)
 
 local AYAR = {
     port = 8765,            -- bot.py'deki bridge_port ile aynı olmalı
+    host = nil,             -- nil: emülatör için 10.0.2.2, sonra 127.0.0.1 denenir; PC'nin LAN IP'si de yazılabilir
     ad = nil,               -- script adı; nil = yerel oyuncunun adı
     chat_komut = "/inv",    -- oyun içi komut
     veri_modu = true,       -- önce oyun verisinden (remote) okumayı dene
@@ -46,10 +47,17 @@ end
 -- ===== 2) KÖPRÜ (127.0.0.1 HTTP) =========================================
 local http = (syn and syn.request) or (http and http.request) or http_request or request
 
-local function kopru(yol, govde)
+-- Emülatörde (BlueStacks/LDPlayer/MuMu/Delta) 127.0.0.1 EMÜLATÖRÜN kendisidir; PC'ye 10.0.2.2 ile
+-- ulaşılır. PC'de çalışan executor'da ise 127.0.0.1 doğrudur. İkisi de denenir, çalışan hatırlanır.
+-- PC'ye 10.0.2.2 ile ulaşılamıyorsa AYAR.host'a PC'nin LAN IP'sini yaz (ör. "192.168.1.34").
+local ADRESLER = { "10.0.2.2", "127.0.0.1" }
+if AYAR.host then ADRESLER = { AYAR.host, "127.0.0.1" } end
+local aktif_adres = nil
+
+local function tek_adres(adres, yol, govde)
     if not http then return nil end
     local ok, cevap = pcall(http, {
-        Url = ("http://127.0.0.1:%d%s"):format(AYAR.port, yol),
+        Url = ("http://%s:%d%s"):format(adres, AYAR.port, yol),
         Method = govde and "POST" or "GET",
         Headers = { ["Content-Type"] = "application/json" },
         Body = govde and HttpService:JSONEncode(govde) or nil,
@@ -58,6 +66,25 @@ local function kopru(yol, govde)
     if (cevap.StatusCode or 0) ~= 200 then return nil end
     local ok2, veri = pcall(HttpService.JSONDecode, HttpService, cevap.Body or "")
     return ok2 and veri or {}
+end
+
+local function kopru(yol, govde)
+    if aktif_adres then
+        local cevap = tek_adres(aktif_adres, yol, govde)
+        if cevap then return cevap end
+        aktif_adres = nil  -- adres artık cevap vermiyor: yeniden ara
+    end
+    for _, adres in ipairs(ADRESLER) do
+        local cevap = tek_adres(adres, yol, govde)
+        if cevap then
+            if aktif_adres ~= adres then
+                aktif_adres = adres
+                yaz(("bot adresi: %s:%d"):format(adres, AYAR.port))
+            end
+            return cevap
+        end
+    end
+    return nil
 end
 
 local function logla(mesaj)
@@ -790,27 +817,36 @@ end
 
 -- ===== 9) BOT DÖNGÜSÜ ====================================================
 local function dongu()
-    if kopru("/hello", { name = AD }) then
-        yaz(("bot köprüsü hazır: 127.0.0.1:%d"):format(AYAR.port))
-        rozet_yaz("bağlı")
-    else
-        yaz(("bot kapalı (127.0.0.1:%d). Sadece oyun içi komut çalışır; bot.py başlayınca köprü kurulur.")
-            :format(AYAR.port))
-        rozet_yaz("bot kapalı", RENK_HATA)
-    end
+    local bagli = nil
     while calisiyor do
         local cevap = kopru("/poll?name=" .. ad_kodla(AD))
-        if type(cevap) == "table" and cevap.id then
-            local ok, esyalar, hata = pcall(oku, cevap.nick)
-            local govde = { id = cevap.id, name = AD, chat = cevap.chat == true }
-            if ok and esyalar then
-                govde.items = esyalar
-            else
-                govde.error = tostring((not ok and esyalar) or hata or "envanter okunamadı")
+        if cevap == nil then
+            if bagli ~= false then
+                bagli = false
+                rozet_yaz("bot yok", RENK_HATA)
+                yaz(("bot bulunamadı (denenen adresler: %s). PC'de bot.py açık mı? Windows güvenlik duvarı "
+                    .. "8765'e izin veriyor mu? Emülatörde 10.0.2.2 PC'yi gösterir; gerekirse AYAR.host'a "
+                    .. "PC'nin LAN IP'sini yaz."):format(table.concat(ADRESLER, ", ")))
             end
-            kopru("/result", govde)
+        else
+            if bagli ~= true then
+                bagli = true
+                kopru("/hello", { name = AD })
+                rozet_yaz("bağlı")
+                yaz(("bot bağlı: %s:%d"):format(tostring(aktif_adres), AYAR.port))
+            end
+            if type(cevap) == "table" and cevap.id then
+                local ok, esyalar, hata = pcall(oku, cevap.nick)
+                local govde = { id = cevap.id, name = AD, chat = cevap.chat == true }
+                if ok and esyalar then
+                    govde.items = esyalar
+                else
+                    govde.error = tostring((not ok and esyalar) or hata or "envanter okunamadı")
+                end
+                kopru("/result", govde)
+            end
         end
-        task.wait(AYAR.poll_araligi)  -- iş olsa da olmasa da kısa bekle
+        task.wait(bagli == false and 2 or AYAR.poll_araligi)  -- bağlantı yokken daha seyrek dene
     end
 end
 
