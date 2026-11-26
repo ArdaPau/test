@@ -5,6 +5,7 @@ local RunService         = game:GetService("RunService")
 local TweenService       = game:GetService("TweenService")
 local ReplicatedStorage  = game:GetService("ReplicatedStorage")
 local HttpService        = game:GetService("HttpService")
+local TeleportService    = game:GetService("TeleportService")
 local Workspace          = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
 while not LocalPlayer do
@@ -256,6 +257,21 @@ local function defaultTabs()
                     btn = { en = "Play", tr = "Oynat" },
                 },
                 {
+                    type = "action", id = "emote_hump",
+                    label = { en = "Hump", tr = "Dayama" },
+                    btn = { en = "Play", tr = "Oynat" },
+                },
+                {
+                    type = "action", id = "emote_hand",
+                    label = { en = "Hand", tr = "El Hareketi" },
+                    btn = { en = "Play", tr = "Oynat" },
+                },
+                {
+                    type = "action", id = "emote_kick",
+                    label = { en = "Flying Kick", tr = "Uçuran Tekme" },
+                    btn = { en = "Kick", tr = "Tekme" },
+                },
+                {
                     type = "keybind_button", id = "emote_stop",
                     label = { en = "Stop Emote", tr = "Emote Durdur" },
                     btn = { en = "Stop Emote", tr = "Emote Durdur" },
@@ -323,6 +339,20 @@ local function defaultTabs()
             icon = "⚙",
             badge = { en = "System", tr = "Sistem" },
             items = {
+                {
+                    type = "section", id = "sec_join",
+                    label = { en = "Join Player", tr = "Oyuncuya Join" },
+                },
+                {
+                    type = "join_player", id = "join_player",
+                    label = { en = "Join by ID / nickname", tr = "ID / nick ile join" },
+                    desc = {
+                        en = "Teleports to that player's server if their joins are open",
+                        tr = "Join açıksa oyuncunun sunucusuna ışınlanır",
+                    },
+                    placeholder = { en = "User ID or nickname...", tr = "ID veya nick..." },
+                    btn = { en = "Join", tr = "Join" },
+                },
                 {
                     type = "toggle", id = "auto_gun", feature = "autoGun",
                     label = { en = "Auto grab gun", tr = "Auto grab gun" },
@@ -590,54 +620,170 @@ local function getRig(char)
     end
     return rig
 end
-local emoteDefs = {
-    Zen = function(rig, time)
-        local breathe = math.sin(time * 2) * 0.05
-        if rig.Waist then rig.Waist.Transform = CFrame.new(0, -0.35, 0) * CFrame.Angles(math.rad(12), 0, 0) end
-        if rig.Neck then rig.Neck.Transform = CFrame.Angles(math.rad(-12), 0, 0) end
-        if rig.LeftShoulder then rig.LeftShoulder.Transform = CFrame.Angles(0, math.rad(40), math.rad(-75)) end
-        if rig.RightShoulder then rig.RightShoulder.Transform = CFrame.Angles(0, math.rad(-40), math.rad(75)) end
-        if rig.LeftElbow then rig.LeftElbow.Transform = CFrame.Angles(0, math.rad(-100), 0) end
-        if rig.RightElbow then rig.RightElbow.Transform = CFrame.Angles(0, math.rad(100), 0) end
-        if rig.LeftWrist then rig.LeftWrist.Transform = CFrame.Angles(0, 0, math.rad(-30 + breathe * 40)) end
-        if rig.RightWrist then rig.RightWrist.Transform = CFrame.Angles(0, 0, math.rad(30 - breathe * 40)) end
-        if rig.LeftHip then rig.LeftHip.Transform = CFrame.Angles(math.rad(-75), 0, math.rad(35)) end
-        if rig.RightHip then rig.RightHip.Transform = CFrame.Angles(math.rad(-75), 0, math.rad(-35)) end
-        if rig.LeftKnee then rig.LeftKnee.Transform = CFrame.Angles(math.rad(95), 0, 0) end
-        if rig.RightKnee then rig.RightKnee.Transform = CFrame.Angles(math.rad(95), 0, 0) end
-        if rig.RootJoint then rig.RootJoint.Transform = CFrame.new(0, breathe, 0) end
-    end,
-    Floss = function(rig, time)
-        local w = math.sin(time * 9)
-        if rig.Waist then rig.Waist.Transform = CFrame.Angles(0, math.rad(w * 14), 0) end
-        if rig.RootJoint then rig.RootJoint.Transform = CFrame.new(0, math.abs(w) * 0.2, 0) end
-        if rig.LeftShoulder then rig.LeftShoulder.Transform = CFrame.Angles(0, 0, math.rad(-85 - w * 55)) end
-        if rig.RightShoulder then rig.RightShoulder.Transform = CFrame.Angles(0, 0, math.rad(85 + w * 55)) end
-        if rig.LeftElbow then rig.LeftElbow.Transform = CFrame.Angles(0, 0, math.rad(-25)) end
-        if rig.RightElbow then rig.RightElbow.Transform = CFrame.Angles(0, 0, math.rad(25)) end
-        if rig.LeftHip then rig.LeftHip.Transform = CFrame.Angles(0, math.rad(w * 10), math.rad(-w * 10)) end
-        if rig.RightHip then rig.RightHip.Transform = CFrame.Angles(0, math.rad(w * 10), math.rad(-w * 10)) end
-    end,
-}
-local emoteConn, emoteRig, emoteClock, emoteAnimate
-local function stopProcedural()
-    if emoteConn then emoteConn:Disconnect(); emoteConn = nil end
-    if emoteRig then
-        for _, m in pairs(emoteRig) do
-            if m.Parent then m.Transform = CFrame.identity end
-        end
-        emoteRig = nil
+local function charHRP(char)
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    return (hum and hum.RootPart) or (char and char:FindFirstChild("HumanoidRootPart"))
+end
+local function joint(rig, name, cf)
+    local motor = rig[name]
+    if motor and motor.Parent then
+        motor.Transform = cf
     end
+end
+local function resetRig(rig)
+    for _, motor in pairs(rig) do
+        if motor.Parent then motor.Transform = CFrame.identity end
+    end
+end
+local KICK_CYCLE = 1.4
+local emoteKickCycle = -1
+local function kickExtend(time)
+    local phase = time % KICK_CYCLE
+    if phase < 0.12 then
+        return (phase / 0.12) * 0.2
+    elseif phase < 0.34 then
+        return 1
+    elseif phase < 0.7 then
+        return math.max(0, 1 - (phase - 0.34) / 0.36)
+    end
+    return 0
+end
+local emoteDefs = {
+    Zen = {
+        pose = function(rig, time)
+            local breathe = math.sin(time * 2) * 0.04
+            joint(rig, "Waist", CFrame.new(0, -0.25, 0) * CFrame.Angles(math.rad(10), 0, 0))
+            joint(rig, "RootJoint", CFrame.new(0, breathe, 0))
+            joint(rig, "Neck", CFrame.Angles(math.rad(-8), 0, 0))
+            joint(rig, "LeftShoulder", CFrame.Angles(math.rad(10), math.rad(25), math.rad(-70)))
+            joint(rig, "RightShoulder", CFrame.Angles(math.rad(10), math.rad(-25), math.rad(70)))
+            joint(rig, "LeftElbow", CFrame.Angles(0, math.rad(-80), 0))
+            joint(rig, "RightElbow", CFrame.Angles(0, math.rad(80), 0))
+            joint(rig, "LeftWrist", CFrame.Angles(0, 0, math.rad(-25 + breathe * 120)))
+            joint(rig, "RightWrist", CFrame.Angles(0, 0, math.rad(25 - breathe * 120)))
+            joint(rig, "LeftHip", CFrame.Angles(math.rad(-65), 0, math.rad(30)))
+            joint(rig, "RightHip", CFrame.Angles(math.rad(-65), 0, math.rad(-30)))
+            joint(rig, "LeftKnee", CFrame.Angles(math.rad(85), 0, 0))
+            joint(rig, "RightKnee", CFrame.Angles(math.rad(85), 0, 0))
+        end,
+    },
+    Floss = {
+        pose = function(rig, time)
+            local w = math.sin(time * 9)
+            joint(rig, "Waist", CFrame.Angles(0, math.rad(w * 18), 0))
+            joint(rig, "RootJoint", CFrame.new(w * 0.1, math.abs(w) * 0.15, 0))
+            joint(rig, "LeftShoulder", CFrame.Angles(0, 0, math.rad(-80 - w * 55)))
+            joint(rig, "RightShoulder", CFrame.Angles(0, 0, math.rad(80 + w * 55)))
+            joint(rig, "LeftElbow", CFrame.Angles(0, math.rad(-20), 0))
+            joint(rig, "RightElbow", CFrame.Angles(0, math.rad(20), 0))
+            joint(rig, "LeftHip", CFrame.Angles(0, math.rad(w * 12), math.rad(-w * 18)))
+            joint(rig, "RightHip", CFrame.Angles(0, math.rad(w * 12), math.rad(-w * 18)))
+        end,
+    },
+    Hump = {
+        position = function(hrp, thrp, time)
+            local thrust = math.sin(time * 11) * 0.32
+            hrp.CFrame = thrp.CFrame * CFrame.new(0, 0, 1.1 + thrust)
+            hrp.AssemblyLinearVelocity = Vector3.new()
+        end,
+        pose = function(rig, time)
+            local w = math.sin(time * 11)
+            joint(rig, "Waist", CFrame.new(0, 0, w * 0.12) * CFrame.Angles(math.rad(16 + w * 6), 0, 0))
+            joint(rig, "RootJoint", CFrame.new(0, 0, w * 0.18))
+            joint(rig, "Neck", CFrame.Angles(math.rad(-10), 0, 0))
+            joint(rig, "LeftShoulder", CFrame.Angles(math.rad(20), math.rad(55), math.rad(-30)))
+            joint(rig, "RightShoulder", CFrame.Angles(math.rad(20), math.rad(-55), math.rad(30)))
+            joint(rig, "LeftElbow", CFrame.Angles(0, math.rad(-45), 0))
+            joint(rig, "RightElbow", CFrame.Angles(0, math.rad(45), 0))
+            joint(rig, "LeftHip", CFrame.Angles(math.rad(-10), 0, math.rad(8)))
+            joint(rig, "RightHip", CFrame.Angles(math.rad(-10), 0, math.rad(-8)))
+            joint(rig, "LeftKnee", CFrame.Angles(math.rad(25), 0, 0))
+            joint(rig, "RightKnee", CFrame.Angles(math.rad(25), 0, 0))
+        end,
+    },
+    Hand = {
+        position = function(hrp, thrp, time)
+            local stand = thrp.Position + thrp.CFrame.LookVector * 2.6
+            local pos = Vector3.new(stand.X, hrp.Position.Y, stand.Z)
+            local look = Vector3.new(thrp.Position.X, hrp.Position.Y, thrp.Position.Z)
+            if (look - pos).Magnitude > 0.1 then
+                hrp.CFrame = CFrame.lookAt(pos, look)
+                hrp.AssemblyLinearVelocity = Vector3.new()
+            end
+        end,
+        pose = function(rig, time)
+            local w = math.sin(time * 10)
+            joint(rig, "RightShoulder", CFrame.Angles(math.rad(55), math.rad(-10), math.rad(62 + w * 14)))
+            joint(rig, "RightElbow", CFrame.Angles(0, math.rad(70 + w * 30), 0))
+            joint(rig, "RightWrist", CFrame.Angles(math.rad(w * 35), 0, 0))
+            joint(rig, "LeftShoulder", CFrame.Angles(0, math.rad(18), math.rad(-22)))
+            joint(rig, "LeftElbow", CFrame.Angles(0, math.rad(-30), 0))
+            joint(rig, "Neck", CFrame.Angles(math.rad(12), 0, 0))
+            joint(rig, "Waist", CFrame.Angles(math.rad(4), 0, 0))
+        end,
+    },
+    Kick = {
+        position = function(hrp, thrp, time)
+            local ext = kickExtend(time)
+            local stand = thrp.Position + thrp.CFrame.LookVector * (3 - 0.8 * ext)
+            local pos = Vector3.new(stand.X, hrp.Position.Y, stand.Z)
+            local look = Vector3.new(thrp.Position.X, hrp.Position.Y, thrp.Position.Z)
+            if (look - pos).Magnitude > 0.1 then
+                hrp.CFrame = CFrame.lookAt(pos, look)
+                hrp.AssemblyLinearVelocity = Vector3.new()
+            end
+        end,
+        pose = function(rig, time)
+            local ext = kickExtend(time)
+            local armSwing = math.sin(time * 10) * 6
+            joint(rig, "RightHip", CFrame.Angles(math.rad(-95 * ext - 5), 0, math.rad(-8 * ext)))
+            joint(rig, "RightKnee", CFrame.Angles(math.rad(20 + 10 * ext), 0, 0))
+            joint(rig, "LeftHip", CFrame.Angles(math.rad(10 * ext), 0, math.rad(6)))
+            joint(rig, "LeftKnee", CFrame.Angles(math.rad(15 * ext), 0, 0))
+            joint(rig, "Waist", CFrame.Angles(math.rad(6 * ext), math.rad(12 * ext), 0))
+            joint(rig, "LeftShoulder", CFrame.Angles(math.rad(35 * ext), math.rad(30), math.rad(-30 - armSwing)))
+            joint(rig, "RightShoulder", CFrame.Angles(math.rad(-25 * ext), math.rad(-25), math.rad(25)))
+            joint(rig, "LeftElbow", CFrame.Angles(0, math.rad(-40), 0))
+        end,
+        tick = function(time, target, char)
+            local cycle = math.floor(time / KICK_CYCLE)
+            if kickExtend(time) < 0.8 or cycle == emoteKickCycle then return end
+            emoteKickCycle = cycle
+            if not target or not target.Parent or not target.Character then return end
+            local thrp = getHRP(target)
+            local hrp = charHRP(char)
+            if not thrp or not hrp then return end
+            local dir = thrp.Position - hrp.Position
+            if dir.Magnitude < 0.05 then dir = thrp.CFrame.LookVector end
+            dir = dir.Unit
+            pcall(function()
+                thrp.AssemblyLinearVelocity = dir * 90 + Vector3.new(0, 45, 0)
+                thrp.AssemblyAngularVelocity = Vector3.new(math.random(-6, 6), math.random(-6, 6), math.random(-6, 6))
+            end)
+            tryFling(target)
+        end,
+    },
+}
+local EMOTE_BIND = "KashMultiEmote"
+local emoteRig, emoteClock, emoteAnimate, emoteTrackConn
+local emoteChar, emoteTarget
+local function stopProcedural()
+    RunService:UnbindFromRenderStep(EMOTE_BIND)
+    if emoteTrackConn then emoteTrackConn:Disconnect(); emoteTrackConn = nil end
+    if emoteRig then resetRig(emoteRig); emoteRig = nil end
     if emoteAnimate and emoteAnimate.Parent then
         pcall(function() emoteAnimate.Disabled = false end)
     end
     emoteAnimate = nil
+    emoteChar = nil
+    emoteTarget = nil
+    emoteKickCycle = -1
 end
-local function startProcedural(name, char)
+local function startProcedural(name, char, partner)
     local def = emoteDefs[name]
     if not def then return end
     stopProcedural()
-    local hum = char:FindFirstChildOfClass("Humanoid")
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
     if not hum then return end
     local animate = char:FindFirstChild("Animate")
     if animate then
@@ -649,19 +795,41 @@ local function startProcedural(name, char)
         for _, tr in ipairs(animator:GetPlayingAnimationTracks()) do
             pcall(function() tr:Stop(0) end)
         end
+        emoteTrackConn = animator.AnimationPlayed:Connect(function(track)
+            if emoteChar == char and emoteRig then
+                pcall(function() track:Stop(0) end)
+            end
+        end)
     end
     emoteRig = getRig(char)
     local has = false
     for _ in pairs(emoteRig) do has = true break end
     if not has then return end
+    emoteChar = char
+    emoteTarget = partner
     emoteClock = 0
-    emoteConn = RunService.RenderStepped:Connect(function(dt)
-        if not char or not char.Parent or not char:FindFirstChildOfClass("Humanoid") then
+    emoteKickCycle = -1
+    -- Karakter animasyonlarından SONRA çalışması için Character + 1 önceliği
+    RunService:BindToRenderStep(EMOTE_BIND, Enum.RenderPriority.Character.Value + 1, function(dt)
+        if not emoteChar or not emoteChar.Parent then
+            stopProcedural()
+            return
+        end
+        local targetHum = emoteChar:FindFirstChildOfClass("Humanoid")
+        if not targetHum or targetHum.Health <= 0 then
             stopProcedural()
             return
         end
         emoteClock = emoteClock + dt
-        def(emoteRig, emoteClock)
+        def.pose(emoteRig, emoteClock)
+        if def.tick then def.tick(emoteClock, emoteTarget, emoteChar) end
+        if def.position and emoteChar == LocalPlayer.Character and not flingBusy then
+            local hrp = charHRP(emoteChar)
+            local thrp = emoteTarget and getHRP(emoteTarget)
+            if hrp and hrp.Parent and thrp and thrp.Parent then
+                def.position(hrp, thrp, emoteClock)
+            end
+        end
     end)
 end
 local function stopEmotes()
@@ -675,11 +843,28 @@ local function stopEmotes()
     end
 end
 local function playEmote(name)
-    local target = state.emotePlayer or LocalPlayer
+    local target = state.emotePlayer
+    if not (target and target.Parent and target.Character) then target = LocalPlayer end
     local char = target.Character
     local hum = char and char:FindFirstChildOfClass("Humanoid")
     if not char or not hum or hum.Health <= 0 then return end
     startProcedural(name, char)
+end
+local function playPartnerEmote(name)
+    local char = LocalPlayer.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if not char or not hum or hum.Health <= 0 then return end
+    local partner = getTargetPlayer(true, true)
+    if not partner or not getHRP(partner) then
+        setStatus(currentLang == "tr" and "Önce bir oyuncu seç (Choose character)"
+            or "Select a player first (Choose character)")
+        return
+    end
+    -- Orbit / tbag ile çakışmasın
+    stopEmotes()
+    startProcedural(name, char, partner)
+    setStatus((name == "Kick" and (currentLang == "tr" and "Tekme: " or "Kick: ")
+        or (currentLang == "tr" and "Emote: " or "Emote: ")) .. partner.Name)
 end
 local function findNearestCoin()
     local hrp = getHRP()
@@ -781,6 +966,156 @@ local function shootMurderer()
     shootBusy = false
     setStatus("Shot at " .. murderer.Name)
 end
+local function joinText(en, tr)
+    return currentLang == "tr" and tr or en
+end
+local function getRequestFunc()
+    return (syn and syn.request) or (http and http.request) or request or http_request
+end
+local function httpJson(method, url, body)
+    local req = getRequestFunc()
+    if not req then return nil, "nohttp" end
+    local ok, response = pcall(function()
+        return req({
+            Url = url,
+            Method = method,
+            Headers = { ["Content-Type"] = "application/json" },
+            Body = body and HttpService:JSONEncode(body) or nil,
+        })
+    end)
+    if not ok or not response then return nil, "request" end
+    if response.StatusCode and response.StatusCode ~= 200 then
+        return nil, "status:" .. tostring(response.StatusCode)
+    end
+    local decodeOk, data = pcall(function()
+        return HttpService:JSONDecode(response.Body)
+    end)
+    if not decodeOk or type(data) ~= "table" then return nil, "decode" end
+    return data
+end
+local function resolveUserId(query)
+    query = tostring(query or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    if query == "" then return nil, "empty" end
+
+    -- Doğrudan sunucudaki bir oyuncuyla eşleşiyor mu?
+    local inServer = Players:FindFirstChild(query)
+    if inServer and inServer.UserId then return inServer.UserId end
+
+    -- Profil linki içinden ID çek
+    local fromUrl = query:match("/users/(%d+)")
+    if fromUrl then return tonumber(fromUrl) end
+
+    -- Sayısal ID
+    local asNumber = tonumber(query)
+    if asNumber and asNumber > 0 and asNumber % 1 == 0 then
+        return math.floor(asNumber)
+    end
+
+    -- Nickname -> UserId
+    local ok, userId = pcall(function()
+        return Players:GetUserIdFromNameAsync(query)
+    end)
+    if ok and userId and userId > 0 then return userId end
+
+    -- Son çare: roproxy kullanıcı arama API'si
+    local data = httpJson("GET", "https://users.roproxy.com/v1/users/search?keyword="
+        .. HttpService:UrlEncode(query) .. "&limit=10")
+    if data and type(data.data) == "table" then
+        local lower = string.lower(query)
+        for _, user in ipairs(data.data) do
+            if type(user.name) == "string" and string.lower(user.name) == lower and user.id then
+                return user.id
+            end
+        end
+        if data.data[1] and data.data[1].id then
+            return data.data[1].id
+        end
+    end
+    return nil, "notfound"
+end
+local function getPresence(userId)
+    local data = httpJson("POST", "https://presence.roproxy.com/v1/presence/users", {
+        userIds = { userId },
+    })
+    if data and type(data.userPresences) == "table" and data.userPresences[1] then
+        return data.userPresences[1]
+    end
+    return nil
+end
+local joinBusy = false
+local function joinByQuery(query, onStatus)
+    local function status(msg)
+        if onStatus then onStatus(msg) end
+        setStatus(msg)
+    end
+    if joinBusy then return end
+    query = tostring(query or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    if query == "" then
+        status(joinText("Enter an ID or nickname", "Bir ID veya nick gir"))
+        return
+    end
+    joinBusy = true
+    status(joinText("Searching user...", "Kullanıcı aranıyor..."))
+    local userId, reason = resolveUserId(query)
+    if not userId then
+        joinBusy = false
+        if reason == "notfound" then
+            status(joinText("User not found", "Kullanıcı bulunamadı"))
+        else
+            status(joinText("Could not resolve user (HTTP unsupported?)",
+                "Kullanıcı çözülemedi (HTTP desteklenmiyor olabilir)"))
+        end
+        return
+    end
+    if Players:GetPlayerByUserId(userId) then
+        joinBusy = false
+        status(joinText("You are already in the same server", "Zaten aynı sunucudasınız"))
+        return
+    end
+    status(joinText("Checking presence...", "Presence kontrol ediliyor..."))
+    local presence = getPresence(userId)
+    if not presence then
+        joinBusy = false
+        status(joinText("Could not fetch presence (rate limit?)",
+            "Presence alınamadı (rate limit olabilir)"))
+        return
+    end
+    if presence.userPresenceType ~= 2 then
+        joinBusy = false
+        status(joinText("User is not in a game right now", "Oyuncu şu an oyunda değil"))
+        return
+    end
+    local placeId = presence.placeId
+    local jobId = presence.gameId
+    if not jobId or not placeId then
+        joinBusy = false
+        status(joinText("Joins are closed (Who can join me)",
+            "Join kapalı olabilir (Who can join me)"))
+        return
+    end
+    if jobId == game.JobId and placeId == game.PlaceId then
+        joinBusy = false
+        status(joinText("You are already in the same server", "Zaten aynı sunucudasınız"))
+        return
+    end
+    status(string.format(joinText("Joining user %s...", "Kullanıcının sunucusuna bağlanılıyor: %s"),
+        tostring(userId)))
+    local teleportOk, teleportErr = pcall(function()
+        TeleportService:TeleportToPlaceInstance(placeId, jobId, LocalPlayer)
+    end)
+    if not teleportOk then
+        joinBusy = false
+        status(joinText("Teleport failed: ", "Işınlanma hatası: ") .. tostring(teleportErr))
+    else
+        task.delay(6, function() joinBusy = false end)
+    end
+end
+TeleportService.TeleportInitFailed:Connect(function(plr, _, message)
+    if plr == LocalPlayer then
+        joinBusy = false
+        setStatus(joinText("Teleport failed: ", "Işınlanma hatası: ") .. tostring(message))
+    end
+end)
 local ui = {}
 setStatus = function(msg)
     if ui.statusLabel then ui.statusLabel.Text = msg or "" end
@@ -1351,6 +1686,7 @@ local CARD_H = {
     keybind_button = 60,
     action = 40,
     section = 22,
+    join_player = 96,
 }
 local function applyHover(card, st)
     card.MouseEnter:Connect(function()
@@ -1688,6 +2024,12 @@ local function buildAction(item, parent, width)
             task.spawn(playEmote, "Zen")
         elseif item.id == "emote_floss" then
             task.spawn(playEmote, "Floss")
+        elseif item.id == "emote_hump" then
+            task.spawn(playPartnerEmote, "Hump")
+        elseif item.id == "emote_hand" then
+            task.spawn(playPartnerEmote, "Hand")
+        elseif item.id == "emote_kick" then
+            task.spawn(playPartnerEmote, "Kick")
         elseif item.id == "save_config" then
             saveConfig()
         elseif item.id == "shoot_now" then
@@ -1854,6 +2196,95 @@ local function buildPlayerSelect(item, parent)
     end)
     return holder
 end
+local function buildJoinPlayer(item, parent)
+    local holder, card = baseCard(parent, nil, CARD_H.join_player)
+    padding(card, 10, 10, 8, 8)
+    makeText(card, {
+        Position = UDim2.fromOffset(0, 0),
+        Size = UDim2.new(1, -90, 0, 15),
+        Text = t(item.label),
+        Font = Enum.Font.GothamMedium,
+        TextSize = 11,
+        TextColor3 = C.text,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+    })
+    makeText(card, {
+        Position = UDim2.fromOffset(0, 16),
+        Size = UDim2.new(1, 0, 0, 13),
+        Text = t(item.desc or ""),
+        TextSize = 9,
+        TextColor3 = C.textFaint,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+    })
+    local inputBox = new("TextBox", {
+        Position = UDim2.fromOffset(0, 34),
+        Size = UDim2.new(1, -86, 0, 28),
+        BackgroundColor3 = C.darker,
+        BorderSizePixel = 0,
+        Font = Enum.Font.Gotham,
+        TextSize = 11,
+        TextColor3 = C.text,
+        PlaceholderColor3 = C.textFaint,
+        PlaceholderText = t(item.placeholder or ""),
+        Text = item.input or "",
+        ClearTextOnFocus = false,
+        Parent = card,
+    })
+    corner(inputBox, 6)
+    stroke(inputBox, C.border, 1, 0)
+    padding(inputBox, 8, 8, 0, 0)
+    local joinBtn = new("TextButton", {
+        Position = UDim2.new(1, -78, 0, 34),
+        Size = UDim2.fromOffset(78, 28),
+        BackgroundColor3 = C.red,
+        BorderSizePixel = 0,
+        AutoButtonColor = false,
+        Text = "",
+        Parent = card,
+    })
+    corner(joinBtn, 6)
+    makeText(joinBtn, {
+        Size = UDim2.fromScale(1, 1),
+        Text = t(item.btn),
+        Font = Enum.Font.GothamBold,
+        TextSize = 10,
+        TextXAlignment = Enum.TextXAlignment.Center,
+        TextColor3 = C.white,
+    })
+    local statusLabel = makeText(card, {
+        Position = UDim2.fromOffset(0, 68),
+        Size = UDim2.new(1, 0, 0, 14),
+        Text = item.joinStatus or "",
+        TextSize = 9,
+        TextColor3 = item.joinStatus and Color3.fromRGB(252, 165, 165) or C.textFaint,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+    })
+    local function pushStatus(msg)
+        item.joinStatus = msg
+        if statusLabel.Parent then
+            statusLabel.Text = msg
+            statusLabel.TextColor3 = Color3.fromRGB(252, 165, 165)
+        end
+    end
+    local function attemptJoin()
+        if joinBusy then
+            pushStatus(joinText("Please wait, joining...", "Bekle, bağlanılıyor..."))
+            return
+        end
+        pushStatus(joinText("Searching user...", "Kullanıcı aranıyor..."))
+        task.spawn(function()
+            joinByQuery(inputBox.Text, pushStatus)
+        end)
+    end
+    inputBox:GetPropertyChangedSignal("Text"):Connect(function()
+        item.input = inputBox.Text
+    end)
+    inputBox.FocusLost:Connect(function(enterPressed)
+        if enterPressed then attemptJoin() end
+    end)
+    joinBtn.MouseButton1Click:Connect(attemptJoin)
+    return holder
+end
 local function buildSection(item, parent)
     local holder = new("Frame", {
         Size = UDim2.new(1, 0, 0, CARD_H.section),
@@ -1889,6 +2320,7 @@ local function buildCard(item, parent, width)
     elseif item.type == "section" then return buildSection(item, parent)
     elseif item.type == "player_fling" then return buildPlayerFling(item, parent)
     elseif item.type == "player_select" then return buildPlayerSelect(item, parent)
+    elseif item.type == "join_player" then return buildJoinPlayer(item, parent)
     end
     return nil
 end
