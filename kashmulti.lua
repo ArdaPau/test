@@ -611,11 +611,14 @@ local function updateHighlights()
         end
     end
 end
+local emoteOrigC0 = {}
 local function getRig(char)
     local rig = {}
     for _, m in ipairs(char:GetDescendants()) do
         if m:IsA("Motor6D") then
-            rig[(string.gsub(m.Name, "%s", ""))] = m
+            local key = string.gsub(m.Name, "%s", "")
+            emoteOrigC0[key] = m.C0
+            rig[key] = m
         end
     end
     return rig
@@ -628,11 +631,22 @@ local function joint(rig, name, cf)
     local motor = rig[name]
     if motor and motor.Parent then
         motor.Transform = cf
+        -- C0'a da yaz: Animator C0'a dokunmadigi icin pose her kosulda gorunur
+        local orig = emoteOrigC0[name]
+        if orig then
+            pcall(function() motor.C0 = orig * cf end)
+        end
     end
 end
 local function resetRig(rig)
-    for _, motor in pairs(rig) do
-        if motor.Parent then motor.Transform = CFrame.identity end
+    for name, motor in pairs(rig) do
+        if motor.Parent then
+            motor.Transform = CFrame.identity
+            local orig = emoteOrigC0[name]
+            if orig then
+                pcall(function() motor.C0 = orig end)
+            end
+        end
     end
 end
 local KICK_CYCLE = 1.4
@@ -765,11 +779,21 @@ local emoteDefs = {
     },
 }
 local EMOTE_BIND = "KashMultiEmote"
-local emoteRig, emoteClock, emoteAnimate, emoteTrackConn
+local emoteRig, emoteClock, emoteAnimate, emoteTrackConn, emoteRenderConn
 local emoteChar, emoteTarget
+local emoteWarned = false
 local function stopProcedural()
-    RunService:UnbindFromRenderStep(EMOTE_BIND)
-    if emoteTrackConn then emoteTrackConn:Disconnect(); emoteTrackConn = nil end
+    if RunService.BindToRenderStep and RunService.UnbindFromRenderStep then
+        pcall(function() RunService:UnbindFromRenderStep(EMOTE_BIND) end)
+    end
+    if emoteRenderConn then
+        pcall(function() emoteRenderConn:Disconnect() end)
+        emoteRenderConn = nil
+    end
+    if emoteTrackConn then
+        pcall(function() emoteTrackConn:Disconnect() end)
+        emoteTrackConn = nil
+    end
     if emoteRig then resetRig(emoteRig); emoteRig = nil end
     if emoteAnimate and emoteAnimate.Parent then
         pcall(function() emoteAnimate.Disabled = false end)
@@ -785,50 +809,83 @@ local function startProcedural(name, char, partner)
     stopProcedural()
     local hum = char and char:FindFirstChildOfClass("Humanoid")
     if not hum then return end
-    local animate = char:FindFirstChild("Animate")
-    if animate then
-        emoteAnimate = animate
-        pcall(function() animate.Disabled = true end)
-    end
-    local animator = hum:FindFirstChildOfClass("Animator")
-    if animator then
-        for _, tr in ipairs(animator:GetPlayingAnimationTracks()) do
-            pcall(function() tr:Stop(0) end)
-        end
-        emoteTrackConn = animator.AnimationPlayed:Connect(function(track)
-            if emoteChar == char and emoteRig then
-                pcall(function() track:Stop(0) end)
-            end
-        end)
-    end
     emoteRig = getRig(char)
     local has = false
     for _ in pairs(emoteRig) do has = true break end
-    if not has then return end
+    if not has then emoteRig = nil return end
     emoteChar = char
     emoteTarget = partner
     emoteClock = 0
     emoteKickCycle = -1
-    -- Karakter animasyonlarından SONRA çalışması için Character + 1 önceliği
-    RunService:BindToRenderStep(EMOTE_BIND, Enum.RenderPriority.Character.Value + 1, function(dt)
-        if not emoteChar or not emoteChar.Parent then
-            stopProcedural()
-            return
-        end
-        local targetHum = emoteChar:FindFirstChildOfClass("Humanoid")
-        if not targetHum or targetHum.Health <= 0 then
-            stopProcedural()
-            return
-        end
-        emoteClock = emoteClock + dt
-        def.pose(emoteRig, emoteClock)
-        if def.tick then def.tick(emoteClock, emoteTarget, emoteChar) end
-        if def.position and emoteChar == LocalPlayer.Character and not flingBusy then
-            local hrp = charHRP(emoteChar)
-            local thrp = emoteTarget and getHRP(emoteTarget)
-            if hrp and hrp.Parent and thrp and thrp.Parent then
-                def.position(hrp, thrp, emoteClock)
+    emoteWarned = false
+    -- Karakter animasyonlarindan SONRA calismasi icin Character + 1 onceligi.
+    -- Bind en basta baglanir; animasyon bastirma hataursa bile pose calismaya devam eder.
+    local function frame(dt)
+        local ok, err = pcall(function()
+            if not emoteChar or not emoteChar.Parent then
+                stopProcedural()
+                return
             end
+            local targetHum = emoteChar:FindFirstChildOfClass("Humanoid")
+            if not targetHum or targetHum.Health <= 0 then
+                stopProcedural()
+                return
+            end
+            emoteClock = emoteClock + dt
+            if def.pose then def.pose(emoteRig, emoteClock) end
+            if def.tick then def.tick(emoteClock, emoteTarget, emoteChar) end
+            if def.position and emoteChar == LocalPlayer.Character and not flingBusy then
+                local hrp = charHRP(emoteChar)
+                local thrp = emoteTarget and getHRP(emoteTarget)
+                if hrp and hrp.Parent and thrp and thrp.Parent then
+                    def.position(hrp, thrp, emoteClock)
+                end
+            end
+        end)
+        if not ok and not emoteWarned then
+            emoteWarned = true
+            pcall(warn, "[KashMulti] Emote frame hatasi: " .. tostring(err))
+        end
+    end
+    if RunService.BindToRenderStep and RunService.UnbindFromRenderStep then
+        local bound = false
+        pcall(function()
+            RunService:BindToRenderStep(EMOTE_BIND, Enum.RenderPriority.Character.Value + 1, frame)
+            bound = true
+        end)
+        if not bound then
+            -- BindToRenderStep yok/hata verdi: RenderStepped ile devam et
+            emoteRenderConn = RunService.RenderStepped:Connect(frame)
+        elseif type(RunService.IsBoundToRenderStep) == "function" and not RunService:IsBoundToRenderStep(EMOTE_BIND) then
+            emoteRenderConn = RunService.RenderStepped:Connect(frame)
+        end
+    else
+        emoteRenderConn = RunService.RenderStepped:Connect(frame)
+    end
+    -- Animasyon bastirma: tek bir hata tum emote'u oldurmeyecek sekilde pcall icerisinde
+    pcall(function()
+        local animate = char:FindFirstChild("Animate")
+        if animate then
+            emoteAnimate = animate
+            animate.Disabled = true
+        end
+        pcall(function()
+            for _, tr in ipairs(hum:GetPlayingAnimationTracks()) do
+                tr:Stop(0)
+            end
+        end)
+        local animator = hum:FindFirstChildOfClass("Animator")
+        if animator then
+            pcall(function()
+                for _, tr in ipairs(animator:GetPlayingAnimationTracks()) do
+                    tr:Stop(0)
+                end
+            end)
+            emoteTrackConn = animator.AnimationPlayed:Connect(function(track)
+                if emoteChar == char and emoteRig then
+                    pcall(function() track:Stop(0) end)
+                end
+            end)
         end
     end)
 end
