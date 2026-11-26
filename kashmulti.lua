@@ -287,10 +287,10 @@ local function defaultTabs()
                     type = "emote_id", id = "emote_id_play",
                     label = { en = "Play emote by ID", tr = "ID ile emote oynat" },
                     desc = {
-                        en = "Paste rbxassetid or catalog link • R15 only",
-                        tr = "rbxassetid veya katalog linki yapıştır • sadece R15",
+                        en = "Bundle ID, catalog link or rbxassetid • R15 only",
+                        tr = "Bundle ID, katalog linki veya rbxassetid • sadece R15",
                     },
-                    input = "", loop = false, also = false,
+                    input = "", loop = true, also = false,
                 },
                 {
                     type = "player_select", id = "emote_player",
@@ -815,7 +815,7 @@ local emoteDefs = {
     },
 }
 
--- R15 animasyon ID'leri (replike -> herkes g�r�r). Kendi bulduğun ID ile değiştir.
+-- R15 animasyon ID'leri (replike -> herkes gorur). Kendi buldugun ID ile degistir.
 local EMOTE_ANIM = {
     Zen   = "rbxassetid://507771019",
     Floss = "rbxassetid://507776043",
@@ -1049,6 +1049,9 @@ local function playPartnerEmote(name)
     return true
 end
 
+-- httpJson asagida tanimli; emote bolumu onu gorebilsin diye ileri bildirim
+local httpJson
+
 local function parseAssetId(raw)
     raw = tostring(raw or "")
     local digits = raw:match("(%d+)")
@@ -1058,10 +1061,46 @@ local function parseAssetId(raw)
     return "rbxassetid://" .. tostring(math.floor(n))
 end
 
+local assetCache = {} -- anahtar -> cozulmus rbxassetid
+
+-- Katalog linki / bundle ID / asset ID -> rbxassetid://<asset>
+-- Sayi bundle ise catalog API'den icindeki Asset item'inin ID'sini cikarir.
+-- Cogu UGC emote linkindeki sayi BUNDLE ID'dir, asset ID degil.
+local function resolveToAnim(raw)
+    raw = tostring(raw or "")
+    local key = raw:lower():gsub("%s+", "")
+    if key == "" then return nil end
+    if assetCache[key] then return assetCache[key] end
+
+    local digits = raw:match("(%d+)")
+    if not digits then return nil end
+    local numeric = tonumber(digits)
+    if not numeric or numeric <= 0 then return nil end
+    numeric = math.floor(numeric)
+
+    -- Acikca rbxassetid:// dendiyse bundle denemesine girme
+    if not raw:lower():find("rbxassetid://", 1, true) and httpJson then
+        local data = httpJson("GET", "https://catalog.roproxy.com/v1/bundles/"
+            .. tostring(numeric) .. "/details")
+        if data and type(data.items) == "table" then
+            for _, item in ipairs(data.items) do
+                if item.type == "Asset" and item.id then
+                    local resolved = "rbxassetid://" .. tostring(item.id)
+                    assetCache[key] = resolved
+                    return resolved
+                end
+            end
+        end
+    end
+
+    local plain = "rbxassetid://" .. tostring(numeric)
+    assetCache[key] = plain
+    return plain
+end
+
 local function playEmoteById(raw, opts)
     opts = opts or {}
-    local id = parseAssetId(raw)
-    if not id then
+    if tostring(raw or ""):gsub("%s+", "") == "" then
         setStatus(currentLang == "tr" and "Gecersiz ID" or "Invalid ID")
         return false
     end
@@ -1071,20 +1110,28 @@ local function playEmoteById(raw, opts)
         setStatus(currentLang == "tr" and "Karakter bulunamadi" or "Character not found")
         return false
     end
+
+    setStatus(currentLang == "tr" and "ID cozuluyor..." or "Resolving ID...")
+    local resolved = resolveToAnim(raw)
+    if not resolved then
+        setStatus(currentLang == "tr" and "Gecersiz ID" or "Invalid ID")
+        return false
+    end
+
     stopProcedural()
-    if not playAnimOn(char, id, 1, opts.loop) then
+    if not playAnimOn(char, resolved, 1, opts.loop) then
         setStatus(currentLang == "tr"
-            and "Yuklenemedi (private / R6-only / gecersiz ID)"
-            or "Could not load (private / R6-only / invalid ID)")
+            and "Yuklenemedi (private / gecersiz ID)"
+            or "Could not load (private / invalid ID)")
         return false
     end
     if opts.also then
         local p = state.emotePlayer
         if p and p.Parent and p.Character then
-            playAnimOn(p.Character, id, 1, opts.loop)
+            playAnimOn(p.Character, resolved, 1, opts.loop)
         end
     end
-    setStatus((currentLang == "tr" and "ID emote: " or "ID emote: ") .. id)
+    setStatus((currentLang == "tr" and "ID emote: " or "ID emote: ") .. resolved)
     return true
 end
 -- ============================================================
@@ -1196,7 +1243,7 @@ end
 local function getRequestFunc()
     return (syn and syn.request) or (http and http.request) or request or http_request
 end
-local function httpJson(method, url, body)
+httpJson = function(method, url, body)
     local req = getRequestFunc()
     if not req then return nil, "nohttp" end
     local ok, response = pcall(function()
@@ -2539,7 +2586,7 @@ local function buildEmoteId(item, parent)
         TextSize = 11,
         TextColor3 = C.text,
         PlaceholderColor3 = C.textFaint,
-        PlaceholderText = "rbxassetid://...",
+        PlaceholderText = "catalog link / bundle id",
         Text = item.input or "",
         ClearTextOnFocus = false,
         Parent = card,
@@ -3263,7 +3310,7 @@ task.spawn(function()
                 elseif murderer then
                     local bpGun = LocalPlayer:FindFirstChildOfClass("Backpack")
                     if bpGun and bpGun:FindFirstChild("Gun") then
-                        equipTool("Gun")
+                        equipGun = equipTool("Gun")
                     end
                 end
             end
