@@ -630,8 +630,9 @@ end
 local function joint(rig, name, cf)
     local motor = rig[name]
     if motor and motor.Parent then
-        motor.Transform = cf
-        -- C0'a da yaz: Animator C0'a dokunmadigi icin pose her kosulda gorunur
+        -- Poz SADECE C0 uzerinden uygulanir. Transform da yazilirsa aci iki kez
+        -- uygulanir: Part1 = Part0 * C0 * Transform * C1^-1
+        motor.Transform = CFrame.identity
         local orig = emoteOrigC0[name]
         if orig then
             pcall(function() motor.C0 = orig * cf end)
@@ -778,18 +779,12 @@ local emoteDefs = {
         end,
     },
 }
-local EMOTE_BIND = "KashMultiEmote"
-local emoteRig, emoteClock, emoteAnimate, emoteTrackConn, emoteRenderConn
+local emoteRig, emoteClock, emoteAnimate, emoteTrackConn
 local emoteChar, emoteTarget
+local emoteGen = 0
 local emoteWarned = false
 local function stopProcedural()
-    if RunService.BindToRenderStep and RunService.UnbindFromRenderStep then
-        pcall(function() RunService:UnbindFromRenderStep(EMOTE_BIND) end)
-    end
-    if emoteRenderConn then
-        pcall(function() emoteRenderConn:Disconnect() end)
-        emoteRenderConn = nil
-    end
+    emoteGen = emoteGen + 1
     if emoteTrackConn then
         pcall(function() emoteTrackConn:Disconnect() end)
         emoteTrackConn = nil
@@ -805,89 +800,84 @@ local function stopProcedural()
 end
 local function startProcedural(name, char, partner)
     local def = emoteDefs[name]
-    if not def then return end
+    if not def or not char then return false end
     stopProcedural()
-    local hum = char and char:FindFirstChildOfClass("Humanoid")
-    if not hum then return end
-    emoteRig = getRig(char)
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum then return false end
+    local rig = getRig(char)
     local has = false
-    for _ in pairs(emoteRig) do has = true break end
-    if not has then emoteRig = nil return end
+    for _ in pairs(rig) do has = true break end
+    if not has then return false end
+    local gen = emoteGen
+    emoteRig = rig
     emoteChar = char
     emoteTarget = partner
     emoteClock = 0
     emoteKickCycle = -1
     emoteWarned = false
-    -- Karakter animasyonlarindan SONRA calismasi icin Character + 1 onceligi.
-    -- Bind en basta baglanir; animasyon bastirma hataursa bile pose calismaya devam eder.
-    local function frame(dt)
-        local ok, err = pcall(function()
-            if not emoteChar or not emoteChar.Parent then
-                stopProcedural()
-                return
-            end
-            local targetHum = emoteChar:FindFirstChildOfClass("Humanoid")
-            if not targetHum or targetHum.Health <= 0 then
-                stopProcedural()
-                return
-            end
-            emoteClock = emoteClock + dt
-            if def.pose then def.pose(emoteRig, emoteClock) end
-            if def.tick then def.tick(emoteClock, emoteTarget, emoteChar) end
-            if def.position and emoteChar == LocalPlayer.Character and not flingBusy then
-                local hrp = charHRP(emoteChar)
-                local thrp = emoteTarget and getHRP(emoteTarget)
-                if hrp and hrp.Parent and thrp and thrp.Parent then
-                    def.position(hrp, thrp, emoteClock)
-                end
-            end
-        end)
-        if not ok and not emoteWarned then
-            emoteWarned = true
-            pcall(warn, "[KashMulti] Emote frame hatasi: " .. tostring(err))
-        end
-    end
-    if RunService.BindToRenderStep and RunService.UnbindFromRenderStep then
-        local bound = false
-        pcall(function()
-            RunService:BindToRenderStep(EMOTE_BIND, Enum.RenderPriority.Character.Value + 1, frame)
-            bound = true
-        end)
-        if not bound then
-            -- BindToRenderStep yok/hata verdi: RenderStepped ile devam et
-            emoteRenderConn = RunService.RenderStepped:Connect(frame)
-        elseif type(RunService.IsBoundToRenderStep) == "function" and not RunService:IsBoundToRenderStep(EMOTE_BIND) then
-            emoteRenderConn = RunService.RenderStepped:Connect(frame)
-        end
-    else
-        emoteRenderConn = RunService.RenderStepped:Connect(frame)
-    end
-    -- Animasyon bastirma: tek bir hata tum emote'u oldurmeyecek sekilde pcall icerisinde
+    -- 1) Oyun animasyonlarini durdur: idle/walk pozun uzerine yazmasin
     pcall(function()
-        local animate = char:FindFirstChild("Animate")
-        if animate then
-            emoteAnimate = animate
-            animate.Disabled = true
+        for _, tr in ipairs(hum:GetPlayingAnimationTracks()) do
+            tr:Stop(0)
         end
+    end)
+    local animator = hum:FindFirstChildOfClass("Animator")
+    if animator then
         pcall(function()
-            for _, tr in ipairs(hum:GetPlayingAnimationTracks()) do
+            for _, tr in ipairs(animator:GetPlayingAnimationTracks()) do
                 tr:Stop(0)
             end
         end)
-        local animator = hum:FindFirstChildOfClass("Animator")
-        if animator then
-            pcall(function()
-                for _, tr in ipairs(animator:GetPlayingAnimationTracks()) do
-                    tr:Stop(0)
-                end
-            end)
+        pcall(function()
             emoteTrackConn = animator.AnimationPlayed:Connect(function(track)
                 if emoteChar == char and emoteRig then
                     pcall(function() track:Stop(0) end)
                 end
             end)
+        end)
+    end
+    local animate = char:FindFirstChild("Animate")
+    if animate then
+        emoteAnimate = animate
+        pcall(function() animate.Disabled = true end)
+    end
+    -- 2) Ilk pozu hemen uygula: dongu calismasa bile poz gorunur kalir
+    if def.pose then pcall(def.pose, rig, 0) end
+    -- 3) Heartbeat dongusu. Pozlar Motor6D.C0'a yazildigi icin Animator'in render
+    --    zamanlamasi onemli degil; BindToRenderStep'e ihtiyac yok.
+    task.spawn(function()
+        local last = os.clock()
+        while gen == emoteGen do
+            RunService.Heartbeat:Wait()
+            if gen ~= emoteGen then break end
+            local ch, target = emoteChar, emoteTarget
+            if not ch or not ch.Parent then break end
+            local h2 = ch:FindFirstChildOfClass("Humanoid")
+            if not h2 or h2.Health <= 0 then break end
+            local now = os.clock()
+            local dt = now - last
+            last = now
+            if dt <= 0 or dt > 0.5 then dt = 1 / 60 end
+            emoteClock = emoteClock + dt
+            local frameOk, frameErr = pcall(function()
+                if def.pose then def.pose(rig, emoteClock) end
+                if def.tick then def.tick(emoteClock, target, ch) end
+                if def.position and ch == LocalPlayer.Character and not flingBusy then
+                    local hrp = charHRP(ch)
+                    local thrp = target and getHRP(target)
+                    if hrp and hrp.Parent and thrp and thrp.Parent then
+                        def.position(hrp, thrp, emoteClock)
+                    end
+                end
+            end)
+            if not frameOk and not emoteWarned then
+                emoteWarned = true
+                pcall(warn, "[KashMulti] Emote hatasi: " .. tostring(frameErr))
+            end
         end
+        if gen == emoteGen then stopProcedural() end
     end)
+    return true
 end
 local function stopEmotes()
     stopProcedural()
@@ -904,24 +894,41 @@ local function playEmote(name)
     if not (target and target.Parent and target.Character) then target = LocalPlayer end
     local char = target.Character
     local hum = char and char:FindFirstChildOfClass("Humanoid")
-    if not char or not hum or hum.Health <= 0 then return end
-    startProcedural(name, char)
+    if not char or not hum or hum.Health <= 0 then
+        setStatus(currentLang == "tr" and "Karakter bulunamadı" or "Character not found")
+        return false
+    end
+    if not startProcedural(name, char) then
+        setStatus(currentLang == "tr" and "Karakter eklemleri (Motor6D) bulunamadı"
+            or "Character joints (Motor6D) not found")
+        return false
+    end
+    setStatus((currentLang == "tr" and "Emote: " or "Emote: ") .. name)
+    return true
 end
 local function playPartnerEmote(name)
     local char = LocalPlayer.Character
     local hum = char and char:FindFirstChildOfClass("Humanoid")
-    if not char or not hum or hum.Health <= 0 then return end
+    if not char or not hum or hum.Health <= 0 then
+        setStatus(currentLang == "tr" and "Karakter bulunamadı" or "Character not found")
+        return false
+    end
     local partner = getTargetPlayer(true, true)
     if not partner or not getHRP(partner) then
         setStatus(currentLang == "tr" and "Önce bir oyuncu seç (Choose character)"
             or "Select a player first (Choose character)")
-        return
+        return false
     end
     -- Orbit / tbag ile çakışmasın
     stopEmotes()
-    startProcedural(name, char, partner)
+    if not startProcedural(name, char, partner) then
+        setStatus(currentLang == "tr" and "Karakter eklemleri (Motor6D) bulunamadı"
+            or "Character joints (Motor6D) not found")
+        return false
+    end
     setStatus((name == "Kick" and (currentLang == "tr" and "Tekme: " or "Kick: ")
         or (currentLang == "tr" and "Emote: " or "Emote: ")) .. partner.Name)
+    return true
 end
 local function findNearestCoin()
     local hrp = getHRP()
@@ -1099,6 +1106,31 @@ local function getPresence(userId)
     end
     return nil
 end
+-- Hedef sunucu listede varsa doluluk oranini kontrol eder (en fazla 3 sayfa).
+-- Liste alinamaz/sunucu bulunamazsa nil doner (karar teleport olayina birakilir).
+local function getServerFill(placeId, jobId)
+    local cursor = ""
+    for _ = 1, 3 do
+        local url = string.format("https://games.roproxy.com/v1/games/%s/servers/Public?limit=100",
+            tostring(placeId))
+        if cursor ~= "" then url = url .. "&cursor=" .. HttpService:UrlEncode(cursor) end
+        local data = httpJson("GET", url)
+        if not data or type(data.data) ~= "table" then return nil end
+        for _, server in ipairs(data.data) do
+            if server.id == jobId then
+                local playing = tonumber(server.playing)
+                local maxPlayers = tonumber(server.maxPlayers)
+                if playing and maxPlayers and maxPlayers > 0 then
+                    return playing >= maxPlayers
+                end
+                return nil
+            end
+        end
+        cursor = data.nextPageCursor
+        if not cursor or cursor == "" then break end
+    end
+    return nil
+end
 local joinBusy = false
 local function joinByQuery(query, onStatus)
     local function status(msg)
@@ -1157,22 +1189,76 @@ local function joinByQuery(query, onStatus)
     end
     status(string.format(joinText("Joining user %s...", "Kullanıcının sunucusuna bağlanılıyor: %s"),
         tostring(userId)))
-    local teleportOk, teleportErr = pcall(function()
+    -- Sunucu dolu mu? (roproxy sunucu listesinden kontrol; bulunamazsa sessizce devam)
+    local fullCheck = getServerFill(placeId, jobId)
+    if fullCheck then
+        joinBusy = false
+        status(joinText("Server is full - try again", "Sunucu dolu - tekrar dene"))
+        return
+    end
+    -- Her deneme icin tek kullanimlik hata dinleyicisi + zaman asimi:
+    -- boylece "Joining..." yazisi sonsuza kadar asili kalmaz ve "sunucu dolu" bildirilir.
+    local done = false
+    local failConn
+    local function finish(msg)
+        if done then return end
+        done = true
+        joinBusy = false
+        if failConn then
+            pcall(function() failConn:Disconnect() end)
+            failConn = nil
+        end
+        if msg then status(msg) end
+    end
+    local function failureText(resultName, message)
+        local name = tostring(resultName or "")
+        local lower = string.lower(tostring(message or ""))
+        if string.find(name, "GameFull", 1, true) or string.find(lower, "full", 1, true) then
+            return joinText("Server is full - try again", "Sunucu dolu - tekrar dene")
+        elseif string.find(name, "GameNotFound", 1, true) then
+            return joinText("Server no longer exists", "Sunucu artık yok")
+        elseif string.find(name, "Unauthorized", 1, true) then
+            return joinText("Join is restricted (friends only?)", "Katılım kısıtlı (sadece arkadaşlar?)")
+        end
+        return joinText("Teleport failed: ", "Işınlanma hatası: ")
+            .. tostring(message or resultName or "?")
+    end
+    pcall(function()
+        failConn = TeleportService.TeleportInitFailed:Connect(function(plr, result, message)
+            if plr ~= LocalPlayer or done then return end
+            finish(failureText(result, message))
+        end)
+    end)
+    local attemptOk = false
+    -- Istemciden en guvenilir yol: belirli sunucuya TeleportToPlaceInstance
+    attemptOk = pcall(function()
         TeleportService:TeleportToPlaceInstance(placeId, jobId, LocalPlayer)
     end)
-    if not teleportOk then
-        joinBusy = false
-        status(joinText("Teleport failed: ", "Işınlanma hatası: ") .. tostring(teleportErr))
-    else
-        task.delay(6, function() joinBusy = false end)
+    -- Yedek yol: TeleportAsync + TeleportOptions.ServerInstanceId
+    if not attemptOk and type(TeleportService.TeleportAsync) == "function" then
+        attemptOk = pcall(function()
+            local options = Instance.new("TeleportOptions")
+            options.ServerInstanceId = jobId
+            TeleportService:TeleportAsync(placeId, { LocalPlayer }, options)
+        end)
     end
+    if not attemptOk then
+        finish(joinText("Teleport request rejected", "Işınlanma isteği reddedildi"))
+        return
+    end
+    status(string.format(joinText("Joining user %s... waiting for server",
+        "Bağlanılıyor: %s ... sunucu yanıtı bekleniyor"), tostring(userId)))
+    -- 10 sn icinde hedef sunucuya gecmediysek: sunucu dolu / yanit vermiyor
+    task.delay(10, function()
+        if done then return end
+        if game.JobId ~= jobId or game.PlaceId ~= placeId then
+            finish(joinText("No response - server may be full", "Yanıt yok - sunucu dolu olabilir"))
+        else
+            -- artik hedef sunucudayiz, isinlanma gerceklesti
+            finish()
+        end
+    end)
 end
-TeleportService.TeleportInitFailed:Connect(function(plr, _, message)
-    if plr == LocalPlayer then
-        joinBusy = false
-        setStatus(joinText("Teleport failed: ", "Işınlanma hatası: ") .. tostring(message))
-    end
-end)
 local ui = {}
 setStatus = function(msg)
     if ui.statusLabel then ui.statusLabel.Text = msg or "" end
@@ -2077,23 +2163,33 @@ local function buildAction(item, parent, width)
             flingAll()
             return
         end
+        local emoteHandled = false
+        local actionOk = true
         if item.id == "emote_zen" then
-            task.spawn(playEmote, "Zen")
+            emoteHandled = true
+            actionOk = playEmote("Zen")
         elseif item.id == "emote_floss" then
-            task.spawn(playEmote, "Floss")
+            emoteHandled = true
+            actionOk = playEmote("Floss")
         elseif item.id == "emote_hump" then
-            task.spawn(playPartnerEmote, "Hump")
+            emoteHandled = true
+            actionOk = playPartnerEmote("Hump")
         elseif item.id == "emote_hand" then
-            task.spawn(playPartnerEmote, "Hand")
+            emoteHandled = true
+            actionOk = playPartnerEmote("Hand")
         elseif item.id == "emote_kick" then
-            task.spawn(playPartnerEmote, "Kick")
+            emoteHandled = true
+            actionOk = playPartnerEmote("Kick")
         elseif item.id == "save_config" then
             saveConfig()
         elseif item.id == "shoot_now" then
             task.spawn(shootMurderer)
         end
-        btnText.Text = "✓"
-        setStatus(string.format("%s %s", t(item.label), UITEXT[currentLang].executed))
+        btnText.Text = actionOk and "✓" or "✕"
+        -- Emote fonksiyonlari kendi durum mesajini yazar; burada ezilmemeli
+        if not emoteHandled then
+            setStatus(string.format("%s %s", t(item.label), UITEXT[currentLang].executed))
+        end
         task.delay(0.75, function()
             if btnText and btnText.Parent then btnText.Text = t(item.btn) end
         end)
