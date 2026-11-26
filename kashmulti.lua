@@ -156,7 +156,7 @@ local function defaultFlags()
         autoGun    = false,
         shortcutFling = false,
         shortcutShoot = false,
-        showRoles     = false,
+        showRoles     = true,
     }
 end
 local flags = defaultFlags()
@@ -368,7 +368,7 @@ local function defaultTabs()
                     type = "toggle", id = "sc_roles", feature = "showRoles",
                     label = { en = "Show murderer & sheriff", tr = "Katil ve şerifi göster" },
                     desc = { en = "Shows roles with avatars at bottom right", tr = "Sağ altta avatar ve isimlerle gösterir" },
-                    active = false,
+                    active = true,
                 },
             },
         },
