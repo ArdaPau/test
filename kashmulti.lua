@@ -7,12 +7,12 @@ local ReplicatedStorage  = game:GetService("ReplicatedStorage")
 local HttpService        = game:GetService("HttpService")
 local TeleportService    = game:GetService("TeleportService")
 local Workspace          = game:GetService("Workspace")
+local ContentProvider    = game:GetService("ContentProvider")
 local LocalPlayer = Players.LocalPlayer
 while not LocalPlayer do
     task.wait(0.1)
     LocalPlayer = Players.LocalPlayer
 end
-
 local C = {
     window    = Color3.fromRGB(13, 13, 16),
     sidebar   = Color3.fromRGB(8, 8, 10),
@@ -29,7 +29,6 @@ local C = {
     border    = Color3.fromRGB(40, 40, 44),
     knobOff   = Color3.fromRGB(64, 64, 64),
 }
-
 local function new(class, props)
     local inst = Instance.new(class)
     if props then
@@ -77,9 +76,7 @@ local function makeText(parent, props)
     props.Parent = parent
     return new("TextLabel", props)
 end
-
 local setStatus
-
 local UITEXT = {
     en = {
         searchPlaceholder = "Search...",
@@ -145,7 +142,6 @@ local function t(val)
     if type(val) == "table" then return val[currentLang] or val.en or "" end
     return val or ""
 end
-
 local function defaultFlags()
     return {
         vision     = true,
@@ -169,7 +165,6 @@ local flags = defaultFlags()
 local state = { selectedPlayer = nil, emotePlayer = nil }
 local searchQuery = ""
 local currentTab = "Vision"
-
 local function defaultTabs()
     return {
         {
@@ -420,7 +415,6 @@ local function defaultTabs()
     }
 end
 local tabs = defaultTabs()
-
 local function getHRP(plr)
     plr = plr or LocalPlayer
     local char = plr.Character
@@ -438,7 +432,6 @@ local function hasItem(plr, itemName)
     if bp and bp:FindFirstChild(itemName) then return true end
     return false
 end
-
 local ROLE_COLORS = {
     Murderer = Color3.fromRGB(239, 68, 68),
     Sheriff  = Color3.fromRGB(59, 130, 246),
@@ -497,7 +490,6 @@ local function getTargetPlayer(nearestFallback, preferEmote)
     end
     return best
 end
-
 local flingBusy = false
 local flingDebounce = {}
 local function flingPlayer(target)
@@ -590,7 +582,6 @@ local function flingAll()
         setStatus(UITEXT[currentLang].flingAllDone)
     end)
 end
-
 local hlFolder = Instance.new("Folder")
 hlFolder.Name = "KashMulti_Highlights"
 hlFolder.Parent = Workspace
@@ -630,17 +621,14 @@ local function updateHighlights()
         end
     end
 end
-
 -- ============================================================
 -- EMOTE SISTEMI
 -- ============================================================
 local emoteOrig = {}
-
 local function charHRP(char)
     local hum = char and char:FindFirstChildOfClass("Humanoid")
     return (hum and hum.RootPart) or (char and char:FindFirstChild("HumanoidRootPart"))
 end
-
 local function getRig(char)
     local rig, orig = {}, {}
     for _, m in ipairs(char:GetDescendants()) do
@@ -652,7 +640,6 @@ local function getRig(char)
     end
     return rig, orig
 end
-
 local emoteAnimMode = false
 local function joint(rig, name, cf)
     local motor = rig[name]
@@ -666,7 +653,6 @@ local function joint(rig, name, cf)
         motor.C0 = base * cf
     end)
 end
-
 local function resetRig(rig)
     if not rig then return end
     for name, motor in pairs(rig) do
@@ -681,7 +667,6 @@ local function resetRig(rig)
         end
     end
 end
-
 local KICK_CYCLE = 1.4
 local emoteKickCycle = -1
 local function kickExtend(time)
@@ -695,7 +680,6 @@ local function kickExtend(time)
     end
     return 0
 end
-
 local emoteDefs = {
     Zen = {
         speed = 1,
@@ -814,23 +798,21 @@ local emoteDefs = {
         end,
     },
 }
-
--- R15 animasyon ID'leri (replike -> herkes gorur). Kendi buldugun ID ile degistir.
+-- R15 animasyon ID'leri. UGC emote asset ID'lerini buraya yazabilirsin.
+-- Not: UGC emote'lar R15 animasyonudur, R6 karakterde oynamaz.
 local EMOTE_ANIM = {
-    Zen   = "rbxassetid://507771019",
+    Zen   = "rbxassetid://92237689732858", -- Da Hood Stomp (sahip olunmayan UGC ornegi)
     Floss = "rbxassetid://507776043",
     Hump  = "rbxassetid://507771019",
     Hand  = "rbxassetid://507770239",
     Kick  = "rbxassetid://507772104",
 }
 local EMOTE_PARTNER_ANIM = {}
-
 local emoteRig, emoteClock, emoteAnimate, emoteTrackConn
 local emoteChar, emoteTarget
 local emoteGen = 0
 local emoteWarned = false
 local emoteTracks = {}
-
 local function clearEmoteTracks()
     for ch, data in pairs(emoteTracks) do
         if data.track then pcall(function() data.track:Stop(0.1) end) end
@@ -838,39 +820,53 @@ local function clearEmoteTracks()
         emoteTracks[ch] = nil
     end
 end
-
 local function playAnimOn(char, id, speed, loop)
     local hum = char and char:FindFirstChildOfClass("Humanoid")
     if not hum or hum.Health <= 0 then return nil end
+
+    if hum.RigType == Enum.HumanoidRigType.R6 then
+        pcall(warn, "[KashMulti] UGC emote'lar R15 karakter ister")
+    end
+
     local animator = hum:FindFirstChildOfClass("Animator")
     if not animator then
         animator = Instance.new("Animator")
         animator.Parent = hum
     end
+
     local old = emoteTracks[char]
     if old then
         if old.track then pcall(function() old.track:Stop(0.1) end) end
         if old.animation then pcall(function() old.animation:Destroy() end) end
         emoteTracks[char] = nil
     end
+
     local animation = Instance.new("Animation")
     animation.AnimationId = id
-    local ok, track = pcall(function()
-        return animator:LoadAnimation(animation)
-    end)
+    local ok, track = pcall(function() return animator:LoadAnimation(animation) end)
     if not ok or not track then
         animation:Destroy()
         return nil
     end
+
+    -- Animasyon asset'inin gercekten indirilmesini bekle
+    pcall(function() ContentProvider:PreloadAsync({ animation }) end)
+    local deadline = os.clock() + 4
+    while track.Length <= 0 and os.clock() < deadline do
+        task.wait(0.05)
+    end
     if track.Length <= 0 then
-        track:Destroy()
+        pcall(function() track:Destroy() end)
         animation:Destroy()
         return nil
     end
+    print(string.format("[KashMulti] %s yuklendi (%.2fs)", id, track.Length))
+
     track.Looped = loop and true or false
     track.Priority = Enum.AnimationPriority.Action4
     track:Play(0.15, 1, speed or 1)
     emoteTracks[char] = { track = track, animation = animation }
+
     if not track.Looped then
         task.spawn(function()
             track.Stopped:Wait()
@@ -882,7 +878,6 @@ local function playAnimOn(char, id, speed, loop)
     end
     return track
 end
-
 local function stopProcedural()
     emoteGen = emoteGen + 1
     if emoteTrackConn then
@@ -899,15 +894,12 @@ local function stopProcedural()
     emoteKickCycle = -1
     emoteAnimMode = false
 end
-
 local function startProcedural(name, char, partner)
     local def = emoteDefs[name]
     if not def or not char then return false end
     local hum = char:FindFirstChildOfClass("Humanoid")
     if not hum or hum.Health <= 0 then return false end
-
     stopProcedural()
-
     local gen = emoteGen
     emoteChar   = char
     emoteTarget = partner
@@ -915,7 +907,6 @@ local function startProcedural(name, char, partner)
     emoteKickCycle = -1
     emoteWarned = false
     emoteAnimMode = false
-
     local usingAnim = false
     local animId = EMOTE_ANIM[name]
     if animId and animId ~= "" then
@@ -928,7 +919,6 @@ local function startProcedural(name, char, partner)
             end
         end
     end
-
     if not usingAnim then
         local rig, orig = getRig(char)
         local jointCount = 0
@@ -956,11 +946,9 @@ local function startProcedural(name, char, partner)
         end
         if def.pose then pcall(def.pose, rig, 0) end
     end
-
     if not def.tick and not def.position and not emoteRig then
         return true
     end
-
     task.spawn(function()
         local last = os.clock()
         while gen == emoteGen do
@@ -970,13 +958,11 @@ local function startProcedural(name, char, partner)
             if not ch or not ch.Parent then break end
             local h2 = ch:FindFirstChildOfClass("Humanoid")
             if not h2 or h2.Health <= 0 then break end
-
             local now = os.clock()
             local dt = now - last
             last = now
             if dt <= 0 or dt > 0.5 then dt = 1 / 60 end
             emoteClock = emoteClock + dt
-
             local okFrame, err = pcall(function()
                 if emoteRig and def.pose then def.pose(emoteRig, emoteClock) end
                 if def.tick then def.tick(emoteClock, emoteTarget, ch) end
@@ -997,7 +983,6 @@ local function startProcedural(name, char, partner)
     end)
     return true
 end
-
 local function stopEmotes()
     stopProcedural()
     flags.orbit = false
@@ -1008,7 +993,6 @@ local function stopEmotes()
         end
     end
 end
-
 local function playEmote(name)
     local char = LocalPlayer.Character
     local hum = char and char:FindFirstChildOfClass("Humanoid")
@@ -1024,7 +1008,6 @@ local function playEmote(name)
     setStatus((currentLang == "tr" and "Emote: " or "Emote: ") .. name)
     return true
 end
-
 local function playPartnerEmote(name)
     local char = LocalPlayer.Character
     local hum = char and char:FindFirstChildOfClass("Humanoid")
@@ -1048,10 +1031,8 @@ local function playPartnerEmote(name)
         or (currentLang == "tr" and "Emote: " or "Emote: ")) .. partner.Name)
     return true
 end
-
 -- httpJson asagida tanimli; emote bolumu onu gorebilsin diye ileri bildirim
 local httpJson
-
 local function parseAssetId(raw)
     raw = tostring(raw or "")
     local digits = raw:match("(%d+)")
@@ -1060,44 +1041,56 @@ local function parseAssetId(raw)
     if not n or n <= 0 then return nil end
     return "rbxassetid://" .. tostring(math.floor(n))
 end
-
 local assetCache = {} -- anahtar -> cozulmus rbxassetid
 
 -- Katalog linki / bundle ID / asset ID -> rbxassetid://<asset>
--- Sayi bundle ise catalog API'den icindeki Asset item'inin ID'sini cikarir.
--- Cogu UGC emote linkindeki sayi BUNDLE ID'dir, asset ID degil.
+-- 1) Bundle ise catalog API'den icindeki animasyon asset'ini cikarir
+-- 2) Duz asset ise tipini dogrular (24 = Animation, 61 = EmoteAnimation)
 local function resolveToAnim(raw)
     raw = tostring(raw or "")
     local key = raw:lower():gsub("%s+", "")
     if key == "" then return nil end
     if assetCache[key] then return assetCache[key] end
-
     local digits = raw:match("(%d+)")
     if not digits then return nil end
     local numeric = tonumber(digits)
     if not numeric or numeric <= 0 then return nil end
     numeric = math.floor(numeric)
 
-    -- Acikca rbxassetid:// dendiyse bundle denemesine girme
-    if not raw:lower():find("rbxassetid://", 1, true) and httpJson then
-        local data = httpJson("GET", "https://catalog.roproxy.com/v1/bundles/"
-            .. tostring(numeric) .. "/details")
-        if data and type(data.items) == "table" then
-            for _, item in ipairs(data.items) do
+    if raw:lower():find("rbxassetid://", 1, true) then
+        assetCache[key] = "rbxassetid://" .. numeric
+        return assetCache[key]
+    end
+
+    if httpJson then
+        local b = httpJson("GET", "https://catalog.roproxy.com/v1/bundles/" .. numeric .. "/details")
+        if b and type(b.items) == "table" then
+            for _, item in ipairs(b.items) do
                 if item.type == "Asset" and item.id then
-                    local resolved = "rbxassetid://" .. tostring(item.id)
-                    assetCache[key] = resolved
-                    return resolved
+                    local res = "rbxassetid://" .. tostring(item.id)
+                    assetCache[key] = res
+                    return res
                 end
             end
         end
     end
 
-    local plain = "rbxassetid://" .. tostring(numeric)
+    if httpJson then
+        local a = httpJson("GET", "https://economy.roproxy.com/v2/assets/" .. numeric .. "/details")
+        if a and a.AssetTypeId then
+            local at = tonumber(a.AssetTypeId)
+            if at == 24 or at == 61 then
+                local res = "rbxassetid://" .. numeric
+                assetCache[key] = res
+                return res
+            end
+        end
+    end
+
+    local plain = "rbxassetid://" .. numeric
     assetCache[key] = plain
     return plain
 end
-
 local function playEmoteById(raw, opts)
     opts = opts or {}
     if tostring(raw or ""):gsub("%s+", "") == "" then
@@ -1110,19 +1103,17 @@ local function playEmoteById(raw, opts)
         setStatus(currentLang == "tr" and "Karakter bulunamadi" or "Character not found")
         return false
     end
-
     setStatus(currentLang == "tr" and "ID cozuluyor..." or "Resolving ID...")
     local resolved = resolveToAnim(raw)
     if not resolved then
         setStatus(currentLang == "tr" and "Gecersiz ID" or "Invalid ID")
         return false
     end
-
     stopProcedural()
     if not playAnimOn(char, resolved, 1, opts.loop) then
         setStatus(currentLang == "tr"
-            and "Yuklenemedi (private / gecersiz ID)"
-            or "Could not load (private / invalid ID)")
+            and "Yuklenemedi (private / gecersiz ID / R6)"
+            or "Could not load (private / invalid ID / R6)")
         return false
     end
     if opts.also then
@@ -1135,7 +1126,6 @@ local function playEmoteById(raw, opts)
     return true
 end
 -- ============================================================
-
 local function findNearestCoin()
     local hrp = getHRP()
     if not hrp then return nil end
@@ -1236,7 +1226,6 @@ local function shootMurderer()
     shootBusy = false
     setStatus("Shot at " .. murderer.Name)
 end
-
 local function joinText(en, tr)
     return currentLang == "tr" and tr or en
 end
@@ -1447,12 +1436,10 @@ local function joinByQuery(query, onStatus)
         end
     end)
 end
-
 local ui = {}
 setStatus = function(msg)
     if ui.statusLabel then ui.statusLabel.Text = msg or "" end
 end
-
 local WINDOW_W, WINDOW_H = 660, 404
 local SIDEBAR_W = 176
 local guiParent
@@ -1476,7 +1463,6 @@ local screenGui = new("ScreenGui", {
 })
 ui.screenGui = screenGui
 local flingShortBtn, shootShortBtn, rolesPanel, murdererRow, sheriffRow
-
 local window = new("Frame", {
     Size = UDim2.fromOffset(WINDOW_W, WINDOW_H),
     Position = UDim2.new(0.5, -WINDOW_W / 2, 0.5, -WINDOW_H / 2),
@@ -1512,7 +1498,6 @@ local glowBottom = new("Frame", {
     Parent = stage,
 })
 corner(glowBottom, 105)
-
 local floatBtn = new("TextButton", {
     Size = UDim2.fromOffset(40, 40),
     Position = UDim2.new(0, 16, 0.5, -20),
@@ -1555,7 +1540,6 @@ do
         end
     end)
 end
-
 local function shortcutButton(label, yOff)
     local b = new("TextButton", {
         Size = UDim2.fromOffset(96, 38),
@@ -1579,7 +1563,6 @@ flingShortBtn = shortcutButton("Fling", -16)
 shootShortBtn = shortcutButton("Shoot", -62)
 flingShortBtn.MouseButton1Click:Connect(function() flingCurrent() end)
 shootShortBtn.MouseButton1Click:Connect(function() task.spawn(shootMurderer) end)
-
 local thumbCache = {}
 local function avatarImage(userId)
     if thumbCache[userId] then return thumbCache[userId] end
@@ -1592,7 +1575,6 @@ local function avatarImage(userId)
     end
     return nil
 end
-
 rolesPanel = new("Frame", {
     Size = UDim2.fromOffset(180, 62),
     Position = UDim2.new(1, -16, 1, -112),
@@ -1634,7 +1616,6 @@ local function roleRow(y)
 end
 murdererRow = roleRow(6)
 sheriffRow = roleRow(34)
-
 local sidebar = new("Frame", {
     Size = UDim2.new(0, SIDEBAR_W, 1, 0),
     BackgroundColor3 = C.sidebar,
@@ -1811,7 +1792,6 @@ makeText(activeRow, {
     TextColor3 = C.textFaint,
     TextXAlignment = Enum.TextXAlignment.Right,
 })
-
 local main = new("Frame", {
     Size = UDim2.new(1, -SIDEBAR_W, 1, 0),
     Position = UDim2.fromOffset(SIDEBAR_W, 0),
@@ -1954,9 +1934,7 @@ local resetBtn = new("TextButton", {
     Parent = statusBar,
 })
 ui.resetBtn = resetBtn
-
 local renderTabs, renderContent, updateActiveCount, updateChrome, renderAll
-
 renderTabs = function()
     for _, ch in ipairs(ui.tabList:GetChildren()) do
         if ch:IsA("TextButton") then ch:Destroy() end
@@ -2021,7 +1999,6 @@ renderTabs = function()
         end)
     end
 end
-
 local CARD_H = {
     toggle = 54,
     select = 62,
@@ -2062,7 +2039,6 @@ local function baseCard(parent, width, height)
     applyHover(card, st)
     return holder, card
 end
-
 local function buildToggle(item, parent, width)
     local holder, card = baseCard(parent, width, CARD_H.toggle)
     makeText(card, {
@@ -2122,7 +2098,6 @@ local function buildToggle(item, parent, width)
     end)
     return holder
 end
-
 local function buildSelect(item, parent, width)
     local holder, card = baseCard(parent, width, CARD_H.select)
     makeText(card, {
@@ -2184,7 +2159,6 @@ local function buildSelect(item, parent, width)
     paint()
     return holder
 end
-
 local function buildKeybind(item, parent, fullWidth)
     local height = item.desc and 52 or CARD_H.keybind
     local holder, card = baseCard(parent, fullWidth and 1 or 0.5, height)
@@ -2233,7 +2207,6 @@ local function buildKeybind(item, parent, fullWidth)
     end)
     return holder
 end
-
 local function buildKeybindButton(item, parent, width)
     local holder, card = baseCard(parent, width, CARD_H.keybind_button)
     local hasState = (item.active ~= nil)
@@ -2327,7 +2300,6 @@ local function buildKeybindButton(item, parent, width)
     end)
     return holder
 end
-
 local function buildAction(item, parent, width)
     local holder, card = baseCard(parent, width, CARD_H.action)
     makeText(card, {
@@ -2400,7 +2372,6 @@ local function buildAction(item, parent, width)
     end)
     return holder
 end
-
 local function playerDropdown(item, parent, cardH, listH, onPick)
     local isOpen = item.dropdownOpen
     local playerList = {}
@@ -2509,7 +2480,6 @@ local function playerDropdown(item, parent, cardH, listH, onPick)
     end
     return holder, card
 end
-
 local function buildPlayerFling(item, parent)
     local isOpen = item.dropdownOpen
     local count = 0
@@ -2543,7 +2513,6 @@ local function buildPlayerFling(item, parent)
     end)
     return holder
 end
-
 local function buildPlayerSelect(item, parent)
     local isOpen = item.dropdownOpen
     local count = 0
@@ -2556,7 +2525,6 @@ local function buildPlayerSelect(item, parent)
     end)
     return holder
 end
-
 local function buildEmoteId(item, parent)
     local holder, card = baseCard(parent, nil, 118)
     padding(card, 10, 10, 8, 8)
@@ -2699,7 +2667,6 @@ local function buildEmoteId(item, parent)
     end)
     return holder
 end
-
 local function buildJoinPlayer(item, parent)
     local holder, card = baseCard(parent, nil, CARD_H.join_player)
     padding(card, 10, 10, 8, 8)
@@ -2789,7 +2756,6 @@ local function buildJoinPlayer(item, parent)
     joinBtn.MouseButton1Click:Connect(attemptJoin)
     return holder
 end
-
 local function buildSection(item, parent)
     local holder = new("Frame", {
         Size = UDim2.new(1, 0, 0, CARD_H.section),
@@ -2816,7 +2782,6 @@ local function buildSection(item, parent)
     })
     return holder
 end
-
 local function buildCard(item, parent, width)
     if item.type == "toggle" then return buildToggle(item, parent, width)
     elseif item.type == "select" then return buildSelect(item, parent, width)
@@ -2831,7 +2796,6 @@ local function buildCard(item, parent, width)
     end
     return nil
 end
-
 renderContent = function()
     local tab
     for _, tb in ipairs(tabs) do
@@ -2906,7 +2870,6 @@ renderContent = function()
     end
     flushToggles()
 end
-
 updateActiveCount = function()
     local count = 0
     for _, tab in ipairs(tabs) do
@@ -2920,7 +2883,6 @@ updateActiveCount = function()
         ui.activeCount.Text = count .. " " .. UITEXT[currentLang].activeSuffix
     end
 end
-
 updateChrome = function()
     local txt = UITEXT[currentLang]
     if ui.searchBox then ui.searchBox.PlaceholderText = txt.searchPlaceholder end
@@ -2935,14 +2897,12 @@ updateChrome = function()
         data.text.Font = selected and Enum.Font.GothamBold or Enum.Font.GothamMedium
     end
 end
-
 renderAll = function()
     updateChrome()
     updateActiveCount()
     renderTabs()
     renderContent()
 end
-
 function syncFeature(feature, value)
     for _, tab in ipairs(tabs) do
         for _, item in ipairs(tab.items) do
@@ -2952,7 +2912,6 @@ function syncFeature(feature, value)
         end
     end
 end
-
 function onFlagChanged(feature, value)
     if feature == "vision" and not value then
         clearHighlights()
@@ -2969,13 +2928,11 @@ function onFlagChanged(feature, value)
         rolesPanel.Visible = value
     end
 end
-
 local function applyUiFlags()
     if flingShortBtn then flingShortBtn.Visible = flags.shortcutFling == true end
     if shootShortBtn then shootShortBtn.Visible = flags.shortcutShoot == true end
     if rolesPanel then rolesPanel.Visible = flags.showRoles == true end
 end
-
 function saveConfig()
     local data = { lang = currentLang }
     for _, tab in ipairs(tabs) do
@@ -2996,7 +2953,6 @@ function saveConfig()
         pcall(writefile, "KashMulti_Config.json", json)
     end
 end
-
 local dragging, dragStart, startPos
 local function makeDraggable(frame)
     frame.InputBegan:Connect(function(input)
@@ -3037,7 +2993,6 @@ UserInputService.InputChanged:Connect(function(input)
         end
     end
 end)
-
 local keybindItems = {}
 local function rebuildKeybindCache()
     keybindItems = {}
@@ -3090,7 +3045,6 @@ UserInputService.InputBegan:Connect(function(input, gpe)
         end
     end
 end)
-
 task.spawn(function()
     while true do
         task.wait(0.25)
@@ -3099,7 +3053,6 @@ task.spawn(function()
         end
     end
 end)
-
 task.spawn(function()
     while true do
         task.wait(1)
@@ -3133,7 +3086,6 @@ task.spawn(function()
         end
     end
 end)
-
 local hidden = false
 local hideCF = CFrame.new(0, -60, 0)
 local touchConn
@@ -3160,7 +3112,6 @@ LocalPlayer.CharacterAdded:Connect(function()
     setupTouchFling()
 end)
 task.spawn(setupTouchFling)
-
 local walkAccum = 0
 local orbitAngle = 0
 local tbagClock = 0
@@ -3211,7 +3162,6 @@ RunService.Heartbeat:Connect(function(dt)
         end
     end
 end)
-
 task.spawn(function()
     while true do
         task.wait(0.12)
@@ -3240,7 +3190,6 @@ task.spawn(function()
         end
     end
 end)
-
 task.spawn(function()
     while true do
         task.wait(0.8)
@@ -3250,7 +3199,6 @@ task.spawn(function()
         end
     end
 end)
-
 task.spawn(function()
     while true do
         task.wait(0.35)
@@ -3317,7 +3265,6 @@ task.spawn(function()
         end
     end
 end)
-
 task.spawn(function()
     while true do
         task.wait(0.5)
@@ -3336,12 +3283,10 @@ task.spawn(function()
         end
     end
 end)
-
 searchBox:GetPropertyChangedSignal("Text"):Connect(function()
     searchQuery = string.lower(searchBox.Text)
     renderContent()
 end)
-
 resetBtn.MouseButton1Click:Connect(function()
     tabs = defaultTabs()
     flags = defaultFlags()
@@ -3361,12 +3306,10 @@ resetBtn.MouseButton1Click:Connect(function()
     setStatus(UITEXT[currentLang].resetDone)
     renderAll()
 end)
-
 rebuildKeybindCache()
 renderAll()
 applyUiFlags()
 setStatus(UITEXT[currentLang].themeActive)
-
 pcall(function()
     if readfile and isfile and isfile("KashMulti_Config.json") then
         local json = readfile("KashMulti_Config.json")
